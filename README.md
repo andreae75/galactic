@@ -15,6 +15,10 @@ senza toccare il sistema. Il nome segue la famiglia di casa (Io, Europa, Ganimed
 - **Interruttore nel pannello**: l'applet *Blocco icone del desktop* (lucchetto) sblocca/blocca le icone.
   Di default il desktop è **bloccato**.
 
+## Modifiche rispetto a COSMIC
+
+Versione di base, file toccati e storia delle modifiche: vedi [`CHANGES.md`](CHANGES.md).
+
 ## Struttura
 
 | Cartella | Contenuto |

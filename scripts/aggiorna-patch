@@ -1,0 +1,13 @@
+#!/bin/bash
+# Rigenera le patch di Galactic dai commit locali sopra la base e mostra il riepilogo delle modifiche.
+# Uso: aggiorna-patch   (BUILD=/mnt/garbage/cosmic-build, rami: cosmic-files e cosmic-applets)
+BUILD="${GALACTIC_BUILD:-/mnt/garbage/cosmic-build}/cosmic-epoch"
+OUT="$(cd "$(dirname "$0")/.." && pwd)/patches"
+for r in cosmic-files cosmic-applets; do
+  cd "$BUILD/$r" || exit 1
+  BASE=$(git merge-base HEAD origin/HEAD 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)
+  echo "== $r (base $BASE: $(git log -1 --format=%s "$BASE"))"
+  rm -f "$OUT/$r"/*.patch; mkdir -p "$OUT/$r"
+  git format-patch -q "$BASE..HEAD" -o "$OUT/$r/"
+  git diff --stat "$BASE..HEAD" | tail -12
+done
