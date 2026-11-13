@@ -67,5 +67,10 @@ install -m0755 cosmic-applets/target/release/cosmic-applet-desktop-lock "$P/bin/
 install -Dm0644 cosmic-applets/cosmic-applet-desktop-lock/data/com.system76.CosmicAppletDesktopLock.desktop \
   "$P/share/applications/com.system76.CosmicAppletDesktopLock.desktop"
 
+# il bus utente di systemd non vede ~/cosmic/share: serve il servizio D-Bus del portale (screenshot, file chooser) in ~/.local/share
+mkdir -p "$HOME/.local/share/dbus-1/services"
+printf '[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.cosmic\nExec=%s/libexec/xdg-desktop-portal-cosmic\n' "$P" \
+  > "$HOME/.local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.cosmic.service"
+
 echo "=== $(date '+%F %T') COSMIC aggiornato a $NUOVA (con le patch di Galactic) ==="
 avvisa "Galactic aggiornato a $NUOVA" "Compilato e installato in ~/cosmic (prima: $ATTUALE). Parte al prossimo login; la copia vecchia è in ~/cosmic.prev."
