@@ -1,0 +1,71 @@
+#!/bin/bash
+# Galactic: scarica l'ultima versione stabile di COSMIC (tag epoch-*), riapplica le patch di Galactic,
+# compila e installa in ~/cosmic senza toccare il sistema. Se qualcosa va storto ripristina ~/cosmic.prev.
+# Uso: galactic-update [--force]
+export PATH=/usr/lib/rust-1.97/bin:$PATH          # Rust 1.93-1.95+ richiesto da COSMIC
+BUILD="${GALACTIC_BUILD:-/mnt/garbage/cosmic-build}"   # sorgenti e compilazione (servono ~50 GB)
+export CARGO_HOME="$BUILD/cargo-home"
+export CARGO_BUILD_JOBS="${GALACTIC_JOBS:-4}"
+PATCHES="${GALACTIC_PATCHES:-$HOME/progetti/galactic/patches}"
+B="$BUILD/cosmic-epoch"
+LOG="$BUILD/aggiornamento.log"
+P="$HOME/cosmic"
+MAIL="${GALACTIC_MAIL:-}"
+exec >>"$LOG" 2>&1
+echo "=== $(date '+%F %T') controllo nuove versioni di COSMIC ==="
+
+avvisa() { [ -n "$MAIL" ] && printf 'To: %s\nSubject: %s\n\n%s\n' "$MAIL" "$1" "$2" | /usr/sbin/sendmail -t -oi; }
+
+cd "$B" || exit 1
+git fetch --tags --quiet origin || { echo "fetch fallito"; exit 1; }
+ATTUALE=$(git describe --tags 2>/dev/null | sed 's/-[0-9]*-g[0-9a-f]*$//')
+NUOVA=$(git tag -l 'epoch-*' --sort=-v:refname | grep -v -E 'alpha|beta|rc' | head -1)
+echo "attuale: $ATTUALE  ultima: $NUOVA"
+if [ "$ATTUALE" = "$NUOVA" ] && [ "$1" != "--force" ]; then echo "nessuna novità"; exit 0; fi
+
+echo "--- copia di sicurezza in ~/cosmic.prev"
+rsync -a --delete "$P/" "$HOME/cosmic.prev/"
+
+fallito() {
+  echo "!!! FALLITO: $1 — ripristino la versione precedente"
+  rsync -a --delete "$HOME/cosmic.prev/" "$P/"
+  git checkout -q -f "$ATTUALE" && git submodule update --init --recursive -q
+  avvisa "Galactic: aggiornamento a $NUOVA fallito" "Passaggio: $1. Ho rimesso la versione $ATTUALE. Dettagli: $LOG"
+  exit 1
+}
+
+git checkout -q -f "$NUOVA" || fallito "checkout"
+git submodule update --init --recursive -q --force || fallito "submodule"
+
+# patch di Galactic (se una non si applica più alla nuova versione, ci si ferma)
+for repo in cosmic-files cosmic-applets; do
+  for p in "$PATCHES/$repo"/*.patch; do
+    [ -e "$p" ] || continue
+    (cd "$B/$repo" && git -c user.name=galactic -c user.email=galactic@localhost am --3way -q "$p") \
+      || { (cd "$B/$repo" && git am --abort 2>/dev/null); fallito "patch $(basename "$p") non si applica a $NUOVA"; }
+  done
+done
+
+LIM="systemd-run --user --scope -q -p MemoryHigh=5G -p MemoryMax=6G nice -n 19 ionice -c3"
+$LIM just build || fallito "compilazione"
+(cd cosmic-applets && $LIM cargo build --release -p cosmic-applet-desktop-lock) || fallito "applet blocco icone"
+(cd cosmic-files && $LIM cargo build --release --workspace) || fallito "cosmic-files"
+
+# installazione (senza cosmic-initial-setup, che scrive in /etc)
+for c in cosmic-applets cosmic-app-library cosmic-bg cosmic-comp cosmic-edit cosmic-files cosmic-greeter cosmic-icons \
+         cosmic-idle cosmic-launcher cosmic-monitor cosmic-notifications cosmic-osd cosmic-osk cosmic-panel cosmic-player \
+         cosmic-randr cosmic-screenshot cosmic-settings cosmic-settings-daemon cosmic-session cosmic-store cosmic-term \
+         cosmic-viewer; do
+  just rootdir= prefix="$P" "$c/install" || fallito "installazione $c"
+done
+make -C cosmic-wallpapers install DESTDIR= prefix="$P" || fallito "sfondi"
+make -C cosmic-workspaces-epoch install DESTDIR= prefix="$P" || fallito "workspaces"
+just rootdir="$P/pop-launcher-root" pop-launcher/install || fallito "pop-launcher"
+(cd xdg-desktop-portal-cosmic && just rootdir= prefix="$P" install) || fallito "portal"
+# pezzi di Galactic
+install -m0755 cosmic-applets/target/release/cosmic-applet-desktop-lock "$P/bin/" || fallito "installazione applet blocco"
+install -Dm0644 cosmic-applets/cosmic-applet-desktop-lock/data/com.system76.CosmicAppletDesktopLock.desktop \
+  "$P/share/applications/com.system76.CosmicAppletDesktopLock.desktop"
+
+echo "=== $(date '+%F %T') COSMIC aggiornato a $NUOVA (con le patch di Galactic) ==="
+avvisa "Galactic aggiornato a $NUOVA" "Compilato e installato in ~/cosmic (prima: $ATTUALE). Parte al prossimo login; la copia vecchia è in ~/cosmic.prev."

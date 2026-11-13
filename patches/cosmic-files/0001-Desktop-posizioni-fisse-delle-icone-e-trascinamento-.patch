@@ -1,0 +1,384 @@
+From a0855af495a3e106c822db92047e4fa8fc83d2a3 Mon Sep 17 00:00:00 2001
+From: andreae75 <10085653+andreae75@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 12:24:04 +0100
+Subject: [PATCH 1/2] Desktop: posizioni fisse delle icone e trascinamento su
+ cella
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GZuYQ6B6mgdJM4cFckvB9Z
+---
+ src/desktop_layout.rs |  75 ++++++++++++++++++
+ src/lib.rs            |   1 +
+ src/tab.rs            | 177 +++++++++++++++++++++++++++++++++++++++---
+ 3 files changed, 243 insertions(+), 10 deletions(-)
+ create mode 100644 src/desktop_layout.rs
+
+diff --git a/src/desktop_layout.rs b/src/desktop_layout.rs
+new file mode 100644
+index 0000000..5114673
+--- /dev/null
++++ b/src/desktop_layout.rs
+@@ -0,0 +1,75 @@
++// Posizioni fisse delle icone del desktop (colonna, riga) per nome di file.
++// File: ~/.config/cosmic/com.system76.CosmicFiles/desktop-layout.txt
++// Una riga per icona: "colonna riga nome" (es. "0 2 Jellyfin.desktop"). Le righe che
++// iniziano con # sono commenti. Le icone senza posizione vanno nella prima cella libera.
++
++use std::{
++    collections::HashMap,
++    path::PathBuf,
++    sync::Mutex,
++    time::SystemTime,
++};
++
++static CACHE: Mutex<Option<(Option<SystemTime>, HashMap<String, (usize, usize)>)>> =
++    Mutex::new(None);
++
++fn layout_path() -> Option<PathBuf> {
++    dirs::config_dir().map(|d| d.join("cosmic/com.system76.CosmicFiles/desktop-layout.txt"))
++}
++
++fn parse(text: &str) -> HashMap<String, (usize, usize)> {
++    let mut map = HashMap::new();
++    for line in text.lines() {
++        let line = line.trim();
++        if line.is_empty() || line.starts_with('#') {
++            continue;
++        }
++        let mut parts = line.splitn(3, char::is_whitespace);
++        let (Some(c), Some(r), Some(name)) = (parts.next(), parts.next(), parts.next()) else {
++            continue;
++        };
++        if let (Ok(c), Ok(r)) = (c.parse(), r.parse()) {
++            map.insert(name.trim().to_string(), (c, r));
++        }
++    }
++    map
++}
++
++/// Layout corrente; riletto solo quando il file cambia.
++pub fn load() -> HashMap<String, (usize, usize)> {
++    let Some(path) = layout_path() else {
++        return HashMap::new();
++    };
++    let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
++    let mut cache = CACHE.lock().unwrap();
++    if let Some((cached_mtime, map)) = cache.as_ref() {
++        if *cached_mtime == mtime {
++            return map.clone();
++        }
++    }
++    let map = std::fs::read_to_string(&path)
++        .map(|t| parse(&t))
++        .unwrap_or_default();
++    *cache = Some((mtime, map.clone()));
++    map
++}
++
++/// Salva tutte le posizioni (ordinate, per leggibilità del file).
++pub fn save(cells: &HashMap<String, (usize, usize)>) {
++    let Some(path) = layout_path() else {
++        return;
++    };
++    let mut rows: Vec<_> = cells.iter().collect();
++    rows.sort_by_key(|(name, (c, r))| (*c, *r, (*name).clone()));
++    let mut text = String::from("# colonna riga nome  (scritto da COSMIC Files)\n");
++    for (name, (c, r)) in rows {
++        text.push_str(&format!("{c} {r} {name}\n"));
++    }
++    if let Some(dir) = path.parent() {
++        let _ = std::fs::create_dir_all(dir);
++    }
++    let tmp = path.with_extension("tmp");
++    if std::fs::write(&tmp, text).is_ok() {
++        let _ = std::fs::rename(&tmp, &path);
++    }
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index f2d04d7..ce1b50a 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -17,6 +17,7 @@ mod archive;
+ pub mod channel;
+ pub mod clipboard;
+ pub mod config;
++mod desktop_layout;
+ mod context_action;
+ pub mod dialog;
+ mod key_bind;
+diff --git a/src/tab.rs b/src/tab.rs
+index d462c11..8177b0f 100644
+--- a/src/tab.rs
++++ b/src/tab.rs
+@@ -1832,6 +1832,7 @@ pub enum Message {
+     DndHover(Location),
+     DndEnter(Location),
+     DndLeave(Location),
++    DndMotion(f64, f64),
+     WindowDrag,
+     WindowToggleMaximize,
+     ZoomIn,
+@@ -2811,6 +2812,10 @@ pub struct Tab {
+     pub scroll_opt: Option<AbsoluteOffset>,
+     pub size_opt: Cell<Option<Size>>,
+     pub content_height_opt: Cell<Option<f32>>,
++    /// (larghezza cella, altezza cella, colonne, righe, padding) del desktop, per il drag delle icone
++    pub desktop_metrics: Cell<Option<(f32, f32, usize, usize, f32)>>,
++    /// ultima posizione del puntatore durante un drag sul desktop
++    pub desktop_dnd_pos: Option<(f64, f64)>,
+     pub viewport_opt: Option<Rectangle>,
+     pub item_view_size_opt: Cell<Option<Size>>,
+     pub edit_location: Option<EditLocation>,
+@@ -2955,6 +2960,8 @@ impl Tab {
+             scroll_opt: None,
+             size_opt: Cell::new(None),
+             content_height_opt: Cell::new(None),
++            desktop_metrics: Cell::new(None),
++            desktop_dnd_pos: None,
+             viewport_opt: None,
+             item_view_size_opt: Cell::new(None),
+             edit_location: None,
+@@ -4741,6 +4748,9 @@ impl Tab {
+             }
+             Message::Drop(Some((to, mut from))) => {
+                 self.dnd_hovered = None;
++                if self.try_move_desktop_icons(&to, &from.paths) {
++                    return commands;
++                }
+                 match to {
+                     Location::Desktop(to, ..)
+                     | Location::Path(to)
+@@ -4789,6 +4799,9 @@ impl Tab {
+                     ));
+                 }
+             }
++            Message::DndMotion(x, y) => {
++                self.desktop_dnd_pos = Some((x, y));
++            }
+             Message::DndLeave(loc) => {
+                 if Some(&loc) == self.dnd_hovered.as_ref().map(|(l, _)| l) {
+                     self.dnd_hovered = None;
+@@ -5064,6 +5077,68 @@ impl Tab {
+         Some(items)
+     }
+ 
++    /// Desktop: se le icone trascinate sono già sul desktop, le sposta nella cella sotto il puntatore
++    /// e salva il layout. Restituisce true se ha gestito il rilascio.
++    fn try_move_desktop_icons(&mut self, to: &Location, paths: &[PathBuf]) -> bool {
++        let Location::Desktop(dir, ..) = to else {
++            return false;
++        };
++        if paths.is_empty() || !paths.iter().all(|p| p.parent() == Some(dir.as_path())) {
++            return false;
++        }
++        let (Some((cell_w, cell_h, cols, rows, pad)), Some((x, y))) =
++            (self.desktop_metrics.get(), self.desktop_dnd_pos)
++        else {
++            return true; // già sul desktop: niente da copiare
++        };
++        let Some(items) = self.items_opt.as_ref() else {
++            return true;
++        };
++        // posizioni attuali di tutte le icone visibili
++        let mut cells: HashMap<String, (usize, usize)> = HashMap::new();
++        let mut moving: Vec<(String, (usize, usize))> = Vec::new();
++        for item in items {
++            let Some((r, c)) = item.pos_opt.get() else {
++                continue;
++            };
++            cells.insert(item.name.clone(), (c, r));
++            if item.path_opt().is_some_and(|p| paths.contains(p)) {
++                moving.push((item.name.clone(), (c, r)));
++            }
++        }
++        if moving.is_empty() {
++            return true;
++        }
++        // cella sotto il puntatore
++        let tc = (((x as f32 - pad) / cell_w).floor().max(0.0) as usize).min(cols.saturating_sub(1));
++        let tr = (((y as f32 - pad) / cell_h).floor().max(0.0) as usize).min(rows.saturating_sub(1));
++        // l'icona "di riferimento" (la prima) va nella cella; le altre mantengono la distanza
++        let (_, (rc, rr)) = moving[0].clone();
++        let mut targets: Vec<(String, (usize, usize))> = Vec::new();
++        for (name, (c, r)) in &moving {
++            let nc = tc as isize + (*c as isize - rc as isize);
++            let nr = tr as isize + (*r as isize - rr as isize);
++            if nc < 0 || nr < 0 || nc as usize >= cols || nr as usize >= rows {
++                return true; // fuori dallo schermo: annulla
++            }
++            targets.push((name.clone(), (nc as usize, nr as usize)));
++        }
++        // la cella non deve essere occupata da un'icona che non si sta spostando
++        for (name, cell) in &targets {
++            if cells
++                .iter()
++                .any(|(n, c)| c == cell && n != name && !moving.iter().any(|(m, _)| m == n))
++            {
++                return true;
++            }
++        }
++        for (name, cell) in targets {
++            cells.insert(name, cell);
++        }
++        crate::desktop_layout::save(&cells);
++        true
++    }
++
+     fn dnd_dest<'a>(
+         &self,
+         location: &Location,
+@@ -5724,6 +5799,16 @@ impl Tab {
+             rows_m1 + 1
+         };
+ 
++        if matches!(self.mode, Mode::Desktop) {
++            self.desktop_metrics.set(Some((
++                (item_width + column_spacing as usize) as f32,
++                (item_height + grid_spacing as usize) as f32,
++                cols,
++                rows,
++                space_xxs as f32,
++            )));
++        }
++
+         //TODO: move to function
+         let visible_rect = {
+             // Use cached content height to clamp scroll offset after resize
+@@ -5758,7 +5843,45 @@ impl Tab {
+             let mut row = 0;
+             let mut page_row = 0;
+             let mut hidden = 0;
+-            let mut grid_elements = Vec::new();
++            let mut grid_elements: Vec<Vec<(usize, Element<Message>)>> = Vec::new();
++
++            // Desktop: celle fisse da desktop-layout.txt, le altre icone nella prima cella libera
++            let desktop_cells: Option<HashMap<usize, (usize, usize)>> =
++                if matches!(self.mode, Mode::Desktop) {
++                    let layout = crate::desktop_layout::load();
++                    let mut cells = HashMap::new();
++                    let mut used = BTreeSet::new();
++                    for &(i, item) in &items {
++                        if !show_hidden && item.hidden {
++                            continue;
++                        }
++                        if let Some(&(c, r)) = layout.get(&item.name) {
++                            if c < cols && r < rows && used.insert((r, c)) {
++                                cells.insert(i, (r, c));
++                            }
++                        }
++                    }
++                    let mut n = 0usize;
++                    for &(i, item) in &items {
++                        if (!show_hidden && item.hidden) || cells.contains_key(&i) {
++                            continue;
++                        }
++                        loop {
++                            let page = n / (rows * cols);
++                            let c = (n / rows) % cols;
++                            let r = page * rows + n % rows;
++                            n += 1;
++                            if used.insert((r, c)) {
++                                cells.insert(i, (r, c));
++                                break;
++                            }
++                        }
++                    }
++                    Some(cells)
++                } else {
++                    None
++                };
++
+             for &(i, item) in &items {
+                 if !show_hidden && item.hidden {
+                     item.pos_opt.set(None);
+@@ -5766,6 +5889,10 @@ impl Tab {
+                     hidden += 1;
+                     continue;
+                 }
++                if let Some(&(r, c)) = desktop_cells.as_ref().and_then(|m| m.get(&i)) {
++                    row = r;
++                    col = c;
++                }
+                 item.pos_opt.set(Some((row, col)));
+                 let item_rect = Rectangle::new(
+                     Point::new(
+@@ -5853,20 +5980,25 @@ impl Tab {
+                         .on_middle_press(move |_| Message::MiddleClick(i))
+                         .on_enter(move || Message::HighlightActivate(i))
+                         .on_exit(move || Message::HighlightDeactivate(i));
+-                    grid_elements[row].push(Element::from(mouse_area));
++                    grid_elements[row].push((col, Element::from(mouse_area)));
+                 } else {
+                     // Add a spacer if the row is empty, so scroll works
+                     if grid_elements[row].is_empty() {
+-                        grid_elements[row].push(Element::from(
+-                            widget::column::with_capacity(0)
+-                                .width(Length::Fill)
+-                                .height(Length::Fixed(item_height as f32)),
++                        grid_elements[row].push((
++                            col,
++                            Element::from(
++                                widget::column::with_capacity(0)
++                                    .width(Length::Fill)
++                                    .height(Length::Fixed(item_height as f32)),
++                            ),
+                         ));
+                     }
+                 }
+ 
+                 count += 1;
+-                if matches!(self.mode, Mode::Desktop) {
++                if desktop_cells.is_some() {
++                    // posizione già decisa dalle celle
++                } else if matches!(self.mode, Mode::Desktop) {
+                     row += 1;
+                     if row >= page_row + rows {
+                         row = 0;
+@@ -5886,9 +6018,33 @@ impl Tab {
+                 }
+             }
+ 
+-            for row_elements in grid_elements {
+-                for element in row_elements {
+-                    grid = grid.push(element);
++            for mut row_elements in grid_elements {
++                if desktop_cells.is_some() {
++                    // ordina per colonna e riempi i vuoti con segnaposto della stessa misura
++                    row_elements.sort_by_key(|(c, _)| *c);
++                    if row_elements.is_empty() {
++                        // riga senza icone: mantiene l'altezza
++                        grid = grid.push(
++                            widget::column::with_capacity(0)
++                                .width(Length::Fixed(item_width as f32))
++                                .height(Length::Fixed(item_height as f32)),
++                        );
++                    }
++                    let mut next_col = 0;
++                    for (c, element) in row_elements {
++                        while next_col < c {
++                            grid = grid.push(widget::column::with_capacity(0)
++                                .width(Length::Fixed(item_width as f32))
++                                .height(Length::Fixed(item_height as f32)));
++                            next_col += 1;
++                        }
++                        grid = grid.push(element);
++                        next_col = c + 1;
++                    }
++                } else {
++                    for (_, element) in row_elements {
++                        grid = grid.push(element);
++                    }
+                 }
+                 grid = grid.insert_row();
+             }
+@@ -6626,6 +6782,7 @@ impl Tab {
+             }
+         })
+         .on_enter(move |_, _, _| Message::DndEnter(tab_location_2.clone()))
++        .on_motion(Message::DndMotion)
+         .on_leave(move || Message::DndLeave(tab_location_3.clone()));
+ 
+         dnd_dest.into()
+-- 
+2.53.0
+

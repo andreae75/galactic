@@ -1,0 +1,208 @@
+From 3116fcc316134b7bf7a0451129f9f03a112eea27 Mon Sep 17 00:00:00 2001
+From: andreae75 <10085653+andreae75@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 12:49:22 +0100
+Subject: [PATCH] Nuova applet del pannello: blocco icone del desktop
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GZuYQ6B6mgdJM4cFckvB9Z
+---
+ Cargo.lock                                    | 10 ++
+ Cargo.toml                                    |  1 +
+ cosmic-applet-desktop-lock/Cargo.toml         | 11 +++
+ ...m.system76.CosmicAppletDesktopLock.desktop | 15 +++
+ cosmic-applet-desktop-lock/src/lib.rs         | 95 +++++++++++++++++++
+ cosmic-applet-desktop-lock/src/main.rs        |  7 ++
+ 6 files changed, 139 insertions(+)
+ create mode 100644 cosmic-applet-desktop-lock/Cargo.toml
+ create mode 100644 cosmic-applet-desktop-lock/data/com.system76.CosmicAppletDesktopLock.desktop
+ create mode 100644 cosmic-applet-desktop-lock/src/lib.rs
+ create mode 100644 cosmic-applet-desktop-lock/src/main.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index cf3d59df..b48a21ab 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1083,6 +1083,16 @@ dependencies = [
+  "tracing-subscriber",
+ ]
+ 
++[[package]]
++name = "cosmic-applet-desktop-lock"
++version = "1.11.0"
++dependencies = [
++ "libcosmic",
++ "tracing",
++ "tracing-log",
++ "tracing-subscriber",
++]
++
+ [[package]]
+ name = "cosmic-applet-input-sources"
+ version = "1.11.0"
+diff --git a/Cargo.toml b/Cargo.toml
+index 77d96a98..ef79b9ae 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -11,6 +11,7 @@ members = [
+     "cosmic-applet-network",
+     "cosmic-applet-notifications",
+     "cosmic-applet-osk",
++    "cosmic-applet-desktop-lock",
+     "cosmic-applet-power",
+     "cosmic-applet-status-area",
+     "cosmic-applet-tiling",
+diff --git a/cosmic-applet-desktop-lock/Cargo.toml b/cosmic-applet-desktop-lock/Cargo.toml
+new file mode 100644
+index 00000000..5d7ebfd5
+--- /dev/null
++++ b/cosmic-applet-desktop-lock/Cargo.toml
+@@ -0,0 +1,11 @@
++[package]
++name = "cosmic-applet-desktop-lock"
++version = "1.11.0"
++edition = "2024"
++license = "GPL-3.0-only"
++
++[dependencies]
++libcosmic.workspace = true
++tracing.workspace = true
++tracing-subscriber.workspace = true
++tracing-log.workspace = true
+diff --git a/cosmic-applet-desktop-lock/data/com.system76.CosmicAppletDesktopLock.desktop b/cosmic-applet-desktop-lock/data/com.system76.CosmicAppletDesktopLock.desktop
+new file mode 100644
+index 00000000..77a70344
+--- /dev/null
++++ b/cosmic-applet-desktop-lock/data/com.system76.CosmicAppletDesktopLock.desktop
+@@ -0,0 +1,15 @@
++[Desktop Entry]
++Name=Desktop Icons Lock
++Name[it]=Blocco icone del desktop
++Comment=Lock or unlock the position of desktop icons
++Comment[it]=Blocca o sblocca la posizione delle icone del desktop
++Type=Application
++Exec=cosmic-applet-desktop-lock
++Terminal=false
++Categories=COSMIC;
++Keywords=COSMIC;Applet;Desktop;Icons;Lock;
++Icon=changes-prevent-symbolic
++StartupNotify=true
++NoDisplay=true
++X-CosmicApplet=true
++X-OverflowPriority=10
+diff --git a/cosmic-applet-desktop-lock/src/lib.rs b/cosmic-applet-desktop-lock/src/lib.rs
+new file mode 100644
+index 00000000..fdac9643
+--- /dev/null
++++ b/cosmic-applet-desktop-lock/src/lib.rs
+@@ -0,0 +1,95 @@
++// SPDX-License-Identifier: GPL-3.0-only
++//
++// Pulsante nel pannello: blocca/sblocca le icone del desktop (COSMIC Files).
++// Lo stato è la chiave "desktop_locked" (bool) nella configurazione di COSMIC Files;
++// se manca, il desktop è considerato bloccato.
++
++use cosmic::{
++    Task, app,
++    cosmic_config::{Config, ConfigGet, ConfigSet},
++    iced,
++};
++
++const FILES_ID: &str = "com.system76.CosmicFiles";
++const KEY: &str = "desktop_locked";
++
++fn read_locked() -> bool {
++    Config::new(FILES_ID, 1)
++        .ok()
++        .and_then(|c| c.get::<bool>(KEY).ok())
++        .unwrap_or(true)
++}
++
++struct Button {
++    core: cosmic::app::Core,
++    locked: bool,
++}
++
++#[derive(Debug, Clone)]
++enum Msg {
++    Press,
++}
++
++impl cosmic::Application for Button {
++    type Message = Msg;
++    type Executor = cosmic::SingleThreadExecutor;
++    type Flags = ();
++    const APP_ID: &'static str = "com.system76.CosmicAppletDesktopLock";
++
++    fn init(core: cosmic::app::Core, _: ()) -> (Self, app::Task<Msg>) {
++        (
++            Self {
++                core,
++                locked: read_locked(),
++            },
++            Task::none(),
++        )
++    }
++
++    fn core(&self) -> &cosmic::app::Core {
++        &self.core
++    }
++
++    fn core_mut(&mut self) -> &mut cosmic::app::Core {
++        &mut self.core
++    }
++
++    fn style(&self) -> Option<iced::theme::Style> {
++        Some(cosmic::applet::style())
++    }
++
++    fn update(&mut self, message: Msg) -> app::Task<Msg> {
++        match message {
++            Msg::Press => {
++                let new = !read_locked();
++                match Config::new(FILES_ID, 1) {
++                    Ok(c) => {
++                        if let Err(err) = c.set(KEY, new) {
++                            tracing::error!("impossibile salvare {KEY}: {err}");
++                        }
++                    }
++                    Err(err) => tracing::error!("config COSMIC Files non raggiungibile: {err}"),
++                }
++                self.locked = read_locked();
++            }
++        }
++        Task::none()
++    }
++
++    fn view(&self) -> cosmic::Element<'_, Msg> {
++        let icon = if self.locked {
++            "changes-prevent-symbolic"
++        } else {
++            "changes-allow-symbolic"
++        };
++        self.core
++            .applet
++            .icon_button(icon)
++            .on_press_down(Msg::Press)
++            .into()
++    }
++}
++
++pub fn run() -> iced::Result {
++    cosmic::applet::run::<Button>(())
++}
+diff --git a/cosmic-applet-desktop-lock/src/main.rs b/cosmic-applet-desktop-lock/src/main.rs
+new file mode 100644
+index 00000000..6955cbe0
+--- /dev/null
++++ b/cosmic-applet-desktop-lock/src/main.rs
+@@ -0,0 +1,7 @@
++// SPDX-License-Identifier: GPL-3.0-only
++
++fn main() -> cosmic::iced::Result {
++    tracing_subscriber::fmt::init();
++    let _ = tracing_log::LogTracer::init();
++    cosmic_applet_desktop_lock::run()
++}
+-- 
+2.53.0
+

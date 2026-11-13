@@ -1,0 +1,7 @@
+[Unit]
+Description=Aggiorna COSMIC se esce una nuova versione
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/galactic-update
+TimeoutStartSec=6h

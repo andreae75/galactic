@@ -1,0 +1,48 @@
+From ffe1b644175e66c345c4d107f0bb91bdfe9572cf Mon Sep 17 00:00:00 2001
+From: andreae75 <10085653+andreae75@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 12:49:22 +0100
+Subject: [PATCH 2/2] Desktop: interruttore blocca/sblocca icone (chiave
+ desktop_locked)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GZuYQ6B6mgdJM4cFckvB9Z
+---
+ src/desktop_layout.rs | 10 ++++++++++
+ src/tab.rs            |  3 +++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/src/desktop_layout.rs b/src/desktop_layout.rs
+index 5114673..44b670f 100644
+--- a/src/desktop_layout.rs
++++ b/src/desktop_layout.rs
+@@ -73,3 +73,13 @@ pub fn save(cells: &HashMap<String, (usize, usize)>) {
+         let _ = std::fs::rename(&tmp, &path);
+     }
+ }
++
++/// Desktop bloccato? Chiave "desktop_locked" nella config di COSMIC Files (scritta dall'applet
++/// del pannello). Se manca, è bloccato.
++pub fn is_locked() -> bool {
++    use cosmic::cosmic_config::{Config, ConfigGet};
++    Config::new("com.system76.CosmicFiles", 1)
++        .ok()
++        .and_then(|c| c.get::<bool>("desktop_locked").ok())
++        .unwrap_or(true)
++}
+diff --git a/src/tab.rs b/src/tab.rs
+index 8177b0f..a896781 100644
+--- a/src/tab.rs
++++ b/src/tab.rs
+@@ -5086,6 +5086,9 @@ impl Tab {
+         if paths.is_empty() || !paths.iter().all(|p| p.parent() == Some(dir.as_path())) {
+             return false;
+         }
++        if crate::desktop_layout::is_locked() {
++            return true; // desktop bloccato: le icone non si spostano
++        }
+         let (Some((cell_w, cell_h, cols, rows, pad)), Some((x, y))) =
+             (self.desktop_metrics.get(), self.desktop_dnd_pos)
+         else {
+-- 
+2.53.0
+
