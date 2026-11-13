@@ -36,6 +36,7 @@ senza toccare il sistema. Il nome segue la famiglia di casa (Io, Europa, Ganimed
 5. Aggiornamento settimanale (facoltativo): copia `data/galactic-update.*` in `~/.config/systemd/user/` e
    `systemctl --user enable --now galactic-update.timer`.
 6. Nel pannello: Impostazioni › Desktop › Pannello › applet, aggiungi *Blocco icone del desktop*.
+   Posizione consigliata: a destra, accanto alla selezione della lingua (provato e funzionante).
 
 Se una patch non si applica più a una nuova versione di COSMIC, `galactic-update` si ferma, rimette la versione
 precedente e (se `GALACTIC_MAIL` è impostata) avvisa per mail.
