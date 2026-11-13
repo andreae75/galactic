@@ -29,13 +29,15 @@ without touching the rest of the system. The name follows the planets-and-moons 
 - A small window (400×240, no title bar or menus, draggable) that **stays on top of other windows** and follows you across workspaces. Double-click, `Esc` or `Ctrl+M` bring the normal window back, at the same position in the track.
 - Wayland does not let an app resize its own window, so the player opens a new small window and closes the big one. "Always on top" uses COSMIC's *sticky* state, requested through the compositor's toplevel-management protocol.
 
+**Single instance** for COSMIC Media Player: opening another file while the player is already open loads it in the existing window instead of starting a second process. `cosmic-player --new-window FILE` forces a separate window.
+
 ### Layout of this repository
 
 | Folder | Content |
 |---|---|
 | `patches/cosmic-files/` | patches for `cosmic-files` (fixed cells, drag and drop, lock check, `.7z`/`.rar` extraction) |
 | `patches/cosmic-applets/` | the new `cosmic-applet-desktop-lock` applet |
-| `patches/cosmic-player/` | Mini Player (always on top) for COSMIC Media Player |
+| `patches/cosmic-player/` | Mini Player (always on top) and single instance for COSMIC Media Player |
 | `scripts/galactic-update` | fetches the latest stable COSMIC release, re-applies the patches, builds and installs into `~/cosmic` (backup in `~/cosmic.prev`, automatic rollback) |
 | `scripts/aggiorna-patch` | regenerates the patches from the local commits and prints a summary |
 | `scripts/start-galactic` | session start-up script using the paths in `~/cosmic` |
@@ -92,13 +94,15 @@ senza toccare il resto del sistema. Il nome segue la famiglia di pianeti e lune 
 - Una finestra piccola (400×240, senza barra del titolo né menu, trascinabile) che **resta sopra le altre finestre** e ti segue tra le aree di lavoro. Doppio clic, `Esc` o `Ctrl+M` riportano la finestra normale, allo stesso punto del brano.
 - Wayland non permette a un programma di ridimensionare la propria finestra, quindi il lettore apre una nuova finestra piccola e chiude quella grande. Il "sempre in primo piano" usa lo stato *sticky* di COSMIC, richiesto al compositore con il suo protocollo di gestione delle finestre.
 
+**Istanza unica** per COSMIC Media Player: aprire un altro file con il lettore già aperto lo carica nella finestra esistente, senza avviare un secondo processo. `cosmic-player --new-window FILE` forza una finestra separata.
+
 ### Struttura del repository
 
 | Cartella | Contenuto |
 |---|---|
 | `patches/cosmic-files/` | patch per `cosmic-files` (celle fisse, trascinamento, controllo del blocco, estrazione `.7z`/`.rar`) |
 | `patches/cosmic-applets/` | la nuova applet `cosmic-applet-desktop-lock` |
-| `patches/cosmic-player/` | Mini Player (sempre in primo piano) per COSMIC Media Player |
+| `patches/cosmic-player/` | Mini Player (sempre in primo piano) e istanza unica per COSMIC Media Player |
 | `scripts/galactic-update` | scarica l'ultima release stabile di COSMIC, riapplica le patch, compila e installa in `~/cosmic` (copia di sicurezza `~/cosmic.prev`, ripristino automatico) |
 | `scripts/aggiorna-patch` | rigenera le patch dai commit locali e mostra un riepilogo |
 | `scripts/start-galactic` | avvio della sessione con i percorsi di `~/cosmic` |

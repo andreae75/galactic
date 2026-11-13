@@ -1,0 +1,223 @@
+From 7e6fad3c441bcfc1d6d5b650ec7479f1d58207d7 Mon Sep 17 00:00:00 2001
+From: andreae75 <10085653+andreae75@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 20:24:25 +0100
+Subject: [PATCH 2/2] =?UTF-8?q?Media=20Player:=20istanza=20unica=20(i=20fi?=
+ =?UTF-8?q?le=20vanno=20alla=20finestra=20gi=C3=A0=20aperta;=20--new-windo?=
+ =?UTF-8?q?w=20per=20una=20separata)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Il primo lettore apre un socket in XDG_RUNTIME_DIR; un nuovo avvio gli manda gli URL e termina.
+Il passaggio Mini/normale (GALACTIC_HANDOFF) prende il posto dell'istanza precedente.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GZuYQ6B6mgdJM4cFckvB9Z
+---
+ src/argparse.rs |  1 +
+ src/main.rs     | 28 ++++++++++++++
+ src/single.rs   | 99 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 128 insertions(+)
+ create mode 100644 src/single.rs
+
+diff --git a/src/argparse.rs b/src/argparse.rs
+index f852b29..3975767 100644
+--- a/src/argparse.rs
++++ b/src/argparse.rs
+@@ -62,6 +62,7 @@ pub fn parse() -> Arguments {
+                         warn!("thumbnail requires value");
+                     }
+                 }
++                Ok("new-window") => {} // Galactic: gestito in single.rs
+                 Ok("version") => print_version(),
+                 _ => warn!("unexpected flag: {}", arg.display()),
+             }
+diff --git a/src/main.rs b/src/main.rs
+index 2e999d1..bdee3fe 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -37,6 +37,7 @@ mod menu;
+ #[cfg(feature = "mpris-server")]
+ mod mpris;
+ mod project;
++mod single;
+ #[cfg(feature = "wayland")]
+ mod sticky;
+ mod thumbnail;
+@@ -133,6 +134,19 @@ fn main() -> Result<(), Box<dyn Error>> {
+         }
+     }
+ 
++    // istanza unica: se il lettore è già aperto gli si passano i file e si esce
++    if !single::wants_new_window() && !single::is_handoff() {
++        let urls: Vec<String> = args
++            .url_opt
++            .iter()
++            .chain(args.urls.iter().flatten())
++            .map(|u| u.to_string())
++            .collect();
++        if single::forward_to_running(&urls) {
++            process::exit(0);
++        }
++    }
++
+     #[cfg(all(unix, not(target_os = "redox")))]
+     match fork::daemon(true, true) {
+         Ok(fork::Fork::Child) => (),
+@@ -143,6 +157,8 @@ fn main() -> Result<(), Box<dyn Error>> {
+         }
+     }
+ 
++    single::become_primary();
++
+     localize::localize();
+ 
+     let config = match cosmic_config::Config::new(App::APP_ID, CONFIG_VERSION) {
+@@ -327,6 +343,7 @@ pub enum Message {
+     Fullscreen,
+     MiniPlayer,
+     MiniDrag,
++    SingleInstance(Vec<url::Url>),
+     Key(Modifiers, Physical, Key),
+     AudioCode(usize),
+     AudioToggle,
+@@ -1298,6 +1315,7 @@ impl Application for App {
+                 if let Some(url) = &self.flags.url_opt {
+                     cmd.arg(url.as_str());
+                 }
++                cmd.env("GALACTIC_HANDOFF", "1");
+                 cmd.env("GALACTIC_START", format!("{:.3}", self.position));
+                 if self.video_opt.as_ref().map_or(false, |v| v.paused()) {
+                     cmd.env("GALACTIC_PAUSED", "1");
+@@ -1324,6 +1342,14 @@ impl Application for App {
+                     Err(err) => log::error!("impossibile aprire la nuova finestra: {err}"),
+                 }
+             }
++            Message::SingleInstance(mut urls) => {
++                // un altro avvio del lettore ci ha mandato dei file: si caricano qui
++                match urls.len() {
++                    0 => {}
++                    1 => return self.update(Message::FileLoad(urls.remove(0))),
++                    _ => return self.update(Message::MultipleLoad(urls)),
++                }
++            }
+             Message::MiniDrag => {
+                 if let Some(window_id) = self.core.main_window_id() {
+                     return window::drag(window_id);
+@@ -2355,6 +2381,8 @@ impl Application for App {
+             );
+         }
+ 
++        subscriptions.push(single::subscription());
++
+         #[cfg(feature = "mpris-server")]
+         {
+             subscriptions.push(mpris::subscription());
+diff --git a/src/single.rs b/src/single.rs
+new file mode 100644
+index 0000000..460a990
+--- /dev/null
++++ b/src/single.rs
+@@ -0,0 +1,99 @@
++// Galactic: istanza unica del lettore.
++// Il primo lettore apre un socket in $XDG_RUNTIME_DIR/cosmic-player.sock. Se si lancia di nuovo il
++// lettore (da un file, dal menu, ecc.) il nuovo processo non apre una seconda finestra: manda i file
++// al lettore già aperto e termina. `--new-window` forza una finestra separata. Il passaggio
++// Mini/normale (GALACTIC_HANDOFF) prende il posto dell'istanza precedente.
++
++use cosmic::iced::futures::{self, StreamExt};
++use cosmic::iced::{Subscription, stream};
++use std::any::TypeId;
++use std::io::{BufRead, BufReader, Write};
++use std::os::unix::net::{UnixListener, UnixStream};
++use std::path::PathBuf;
++use std::sync::{Mutex, OnceLock};
++
++use crate::Message;
++
++type Receiver = futures::channel::mpsc::UnboundedReceiver<Vec<url::Url>>;
++static RECEIVER: OnceLock<Mutex<Option<Receiver>>> = OnceLock::new();
++
++fn socket_path() -> Option<PathBuf> {
++    std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join("cosmic-player.sock"))
++}
++
++pub fn wants_new_window() -> bool {
++    std::env::args().any(|a| a == "--new-window")
++}
++
++pub fn is_handoff() -> bool {
++    std::env::var_os("GALACTIC_HANDOFF").is_some()
++}
++
++/// Se un lettore è già in esecuzione gli passa i file e restituisce `true`: questo processo deve uscire.
++pub fn forward_to_running(urls: &[String]) -> bool {
++    let Some(path) = socket_path() else {
++        return false;
++    };
++    let Ok(mut stream) = UnixStream::connect(path) else {
++        return false;
++    };
++    for url in urls {
++        if writeln!(stream, "OPEN {url}").is_err() {
++            return false;
++        }
++    }
++    if urls.is_empty() {
++        let _ = writeln!(stream, "RAISE");
++    }
++    true
++}
++
++/// Diventa il lettore "principale": apre il socket e ascolta le richieste degli altri.
++/// Da chiamare dopo il fork in background. In caso di passaggio Mini/normale prende il posto del precedente.
++pub fn become_primary() {
++    let Some(path) = socket_path() else {
++        return;
++    };
++    if !is_handoff() && UnixStream::connect(&path).is_ok() {
++        return; // c'è già un principale (finestra aperta con --new-window)
++    }
++    let _ = std::fs::remove_file(&path);
++    let Ok(listener) = UnixListener::bind(&path) else {
++        return;
++    };
++    let (tx, rx) = futures::channel::mpsc::unbounded();
++    let _ = RECEIVER.set(Mutex::new(Some(rx)));
++    std::thread::spawn(move || {
++        for stream in listener.incoming().flatten() {
++            let mut urls = Vec::new();
++            for line in BufReader::new(stream).lines().map_while(Result::ok) {
++                if let Some(url) = line.strip_prefix("OPEN ").and_then(|u| url::Url::parse(u).ok()) {
++                    urls.push(url);
++                }
++            }
++            let _ = tx.unbounded_send(urls);
++        }
++    });
++}
++
++pub fn subscription() -> Subscription<Message> {
++    struct SingleInstance;
++    Subscription::run_with(TypeId::of::<SingleInstance>(), |_| {
++        stream::channel(
++            5,
++            |mut msg_tx: futures::channel::mpsc::Sender<Message>| async move {
++                use futures::SinkExt;
++                let rx = RECEIVER.get().and_then(|m| m.lock().ok()?.take());
++                let Some(mut rx) = rx else {
++                    futures::future::pending::<()>().await;
++                    return;
++                };
++                while let Some(urls) = rx.next().await {
++                    if msg_tx.send(Message::SingleInstance(urls)).await.is_err() {
++                        break;
++                    }
++                }
++            },
++        )
++    })
++}
+-- 
+2.53.0
+

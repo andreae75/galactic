@@ -1,7 +1,8 @@
 From 70b720b25ddf4ae45f2303fc8718c04f533ab6bb Mon Sep 17 00:00:00 2001
 From: andreae75 <10085653+andreae75@users.noreply.github.com>
 Date: Fri, 13 Nov 2026 18:10:28 +0100
-Subject: [PATCH] Mini Player: finestra piccola sempre in primo piano (Ctrl+M)
+Subject: [PATCH 1/2] Mini Player: finestra piccola sempre in primo piano
+ (Ctrl+M)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
