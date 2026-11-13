@@ -21,11 +21,15 @@ without touching the rest of the system. The name follows the planets-and-moons 
 - **Panel toggle**: the *Desktop Icons Lock* applet (a padlock) locks or unlocks the icons.
   The desktop is **locked by default**, and with no layout file it behaves exactly like stock COSMIC.
 
+**Extract `.7z` and `.rar` archives** in COSMIC Files (right-click › *Extract here* / *Extract to…*)
+- `.7z`: native, pure Rust ([`sevenz-rust2`](https://github.com/hasenbanck/sevenz-rust), Apache-2.0), including solid and password-protected archives, with progress and cancellation.
+- `.rar`: through a system tool (`unar`, or `7z`/`7zz` as a fallback). RAR decoding is RARLAB proprietary code and cannot be embedded in a GPL program. If neither tool is installed, a message explains what to install.
+
 ### Layout of this repository
 
 | Folder | Content |
 |---|---|
-| `patches/cosmic-files/` | patches for `cosmic-files` (fixed cells, drag and drop, lock check) |
+| `patches/cosmic-files/` | patches for `cosmic-files` (fixed cells, drag and drop, lock check, `.7z`/`.rar` extraction) |
 | `patches/cosmic-applets/` | the new `cosmic-applet-desktop-lock` applet |
 | `scripts/galactic-update` | fetches the latest stable COSMIC release, re-applies the patches, builds and installs into `~/cosmic` (backup in `~/cosmic.prev`, automatic rollback) |
 | `scripts/aggiorna-patch` | regenerates the patches from the local commits and prints a summary |
@@ -75,11 +79,15 @@ senza toccare il resto del sistema. Il nome segue la famiglia di pianeti e lune 
 - **Interruttore nel pannello**: l'applet *Blocco icone del desktop* (un lucchetto) blocca o sblocca le icone.
   Di default il desktop è **bloccato**, e senza file di layout si comporta esattamente come COSMIC originale.
 
+**Estrazione di archivi `.7z` e `.rar`** in COSMIC Files (clic destro › *Estrai qui* / *Estrai in…*)
+- `.7z`: nativo, in Rust puro ([`sevenz-rust2`](https://github.com/hasenbanck/sevenz-rust), Apache-2.0), anche solidi e con password, con avanzamento e annullamento.
+- `.rar`: tramite uno strumento di sistema (`unar`, oppure `7z`/`7zz`). Il decodificatore RAR è codice proprietario di RARLAB e non si può incorporare in un programma GPL. Se non c'è nessuno dei due strumenti, un messaggio spiega cosa installare.
+
 ### Struttura del repository
 
 | Cartella | Contenuto |
 |---|---|
-| `patches/cosmic-files/` | patch per `cosmic-files` (celle fisse, trascinamento, controllo del blocco) |
+| `patches/cosmic-files/` | patch per `cosmic-files` (celle fisse, trascinamento, controllo del blocco, estrazione `.7z`/`.rar`) |
 | `patches/cosmic-applets/` | la nuova applet `cosmic-applet-desktop-lock` |
 | `scripts/galactic-update` | scarica l'ultima release stabile di COSMIC, riapplica le patch, compila e installa in `~/cosmic` (copia di sicurezza `~/cosmic.prev`, ripristino automatico) |
 | `scripts/aggiorna-patch` | rigenera le patch dai commit locali e mostra un riepilogo |

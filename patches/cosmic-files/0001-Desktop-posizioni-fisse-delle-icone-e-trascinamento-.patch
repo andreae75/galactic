@@ -1,7 +1,7 @@
 From a0855af495a3e106c822db92047e4fa8fc83d2a3 Mon Sep 17 00:00:00 2001
 From: andreae75 <10085653+andreae75@users.noreply.github.com>
 Date: Fri, 13 Nov 2026 12:24:04 +0100
-Subject: [PATCH 1/2] Desktop: posizioni fisse delle icone e trascinamento su
+Subject: [PATCH 1/4] Desktop: posizioni fisse delle icone e trascinamento su
  cella
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

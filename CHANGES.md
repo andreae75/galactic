@@ -16,13 +16,16 @@ Tutto il resto di COSMIC (compositor, pannello, impostazioni, ecc.) è **identic
 
 ## File toccati
 
-### `cosmic-files` — 3 file, +256 / −10 righe
+### `cosmic-files` — 6 file, +595 / −12 righe
 
 | File | Cosa cambia |
 |---|---|
 | `src/desktop_layout.rs` (nuovo, 85 righe) | Legge/scrive `~/.config/cosmic/com.system76.CosmicFiles/desktop-layout.txt` (una riga per icona: `colonna riga nome`), con cache che si rilegge solo se il file cambia. Legge anche la chiave `desktop_locked` dalla config di COSMIC Files. |
 | `src/lib.rs` (+1) | Dichiara il modulo `desktop_layout`. |
 | `src/tab.rs` (+180 / −10) | `grid_view`: nel desktop le icone vanno nelle celle salvate (le altre nella prima cella libera, riempimento a colonne come prima); celle vuote disegnate come segnaposto. Nuovi: `desktop_metrics`, `desktop_dnd_pos`, `Message::DndMotion`, `try_move_desktop_icons` (al rilascio di un'icona già sul desktop calcola la cella sotto il puntatore e salva il layout; se il desktop è bloccato non fa nulla). |
+
+| `src/archive.rs` (+291) | `.7z` in Rust puro con `sevenz-rust2` (`sevenz_extract`: annullamento, avanzamento, password, percorsi sicuri); `.rar` tramite `unar` o `7z`/`7zz` (`rar_extract`). Aggiunge i tipi MIME e le estensioni `.7z` e `.rar` (il menu "Estrai" compare per questi file). Test: `GALACTIC_TEST_DIR` (archivi `.7z`), `GALACTIC_RAR_FILE` e `GALACTIC_RAR_OUT` (un `.rar` vero). |
+| `Cargo.toml` (+2), `Cargo.lock` (+48) | Dipendenza `sevenz-rust2 0.25` (Apache-2.0, `aes256`, `bzip2`, `deflate`). |
 
 Comportamento nuovo: se `desktop-layout.txt` non esiste e il desktop è bloccato, il desktop si comporta **come l'originale**.
 
@@ -41,6 +44,10 @@ Comportamento nuovo: se `desktop-layout.txt` non esiste e il desktop è bloccato
 - Trascinamento delle icone su una cella libera (celle occupate: spostamento annullato; più icone: mantengono la distanza).
 - Applet del pannello "Blocco icone del desktop"; di default il desktop è bloccato.
 - Script `galactic-update`: aggiornamento settimanale con riapplicazione delle patch, copia di sicurezza e ripristino.
+
+### 0.0.2 — 2026-11-13
+- Estrazione di archivi `.7z` (Rust nativo, con password) e `.rar` (tramite `unar`/`7z`) da COSMIC Files.
+- `galactic-update`: servizio D-Bus del portale (screenshot) con l'ambiente di `~/cosmic`, collegamento dei componenti di `pop-launcher` (Alt+Tab, ricerca), e compilazione corretta di `cosmic-files` (la modalità applet non va persa).
 
 ## Come si aggiorna questo file
 

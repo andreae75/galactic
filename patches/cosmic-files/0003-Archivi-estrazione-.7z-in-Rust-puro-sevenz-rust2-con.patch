@@ -1,0 +1,331 @@
+From 8c797ff57ee22a29684b763eb07820654d24dc26 Mon Sep 17 00:00:00 2001
+From: andreae75 <10085653+andreae75@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 15:44:33 +0100
+Subject: [PATCH 3/4] Archivi: estrazione .7z in Rust puro (sevenz-rust2), con
+ password e test
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GZuYQ6B6mgdJM4cFckvB9Z
+---
+ Cargo.lock     |  48 ++++++++++++++-
+ Cargo.toml     |   2 +
+ src/archive.rs | 157 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 205 insertions(+), 2 deletions(-)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index c897043..e1f7ae2 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -749,6 +749,15 @@ dependencies = [
+  "zeroize",
+ ]
+ 
++[[package]]
++name = "block-padding"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "710f1dd022ef4e93f8a438b4ba958de7f64308434fa6a87104481645cc30068b"
++dependencies = [
++ "hybrid-array",
++]
++
+ [[package]]
+ name = "block2"
+ version = "0.5.1"
+@@ -936,6 +945,15 @@ dependencies = [
+  "wayland-client",
+ ]
+ 
++[[package]]
++name = "cbc"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ce2dc9ee5f88d11e0beb842c88b33c8a5cf0d1329c4b19494af42b07dbfe8896"
++dependencies = [
++ "cipher",
++]
++
+ [[package]]
+ name = "cc"
+ version = "1.9.0"
+@@ -1421,7 +1439,7 @@ dependencies = [
+  "libc",
+  "libcosmic",
+  "log",
+- "lzma-rust2",
++ "lzma-rust2 0.16.5",
+  "md-5",
+  "mime_guess",
+  "notify-debouncer-full",
+@@ -1438,6 +1456,7 @@ dependencies = [
+  "rust-embed",
+  "rustc-hash 2.1.3",
+  "serde",
++ "sevenz-rust2",
+  "sha2 0.10.9",
+  "shlex 1.3.0",
+  "slotmap",
+@@ -3957,6 +3976,7 @@ version = "0.2.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3ce983bb6fb399067d101fbfc9e74174e07e9f29a2bc679efefeb8c645819c3f"
+ dependencies = [
++ "block-padding",
+  "hybrid-array",
+ ]
+ 
+@@ -4749,6 +4769,12 @@ dependencies = [
+  "sha2 0.11.1",
+ ]
+ 
++[[package]]
++name = "lzma-rust2"
++version = "0.25.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ef1d73c59a56771343712b22ea5615092c612c16ba291c0979e3105dfeec4890"
++
+ [[package]]
+ name = "mac-notification-sys"
+ version = "0.6.15"
+@@ -6686,6 +6712,24 @@ dependencies = [
+  "syn 3.0.9",
+ ]
+ 
++[[package]]
++name = "sevenz-rust2"
++version = "0.25.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e5e465701779cbc6d0d10cf907f175035cfdd50b8d3cb628d7f1f435ef02972f"
++dependencies = [
++ "aes",
++ "bzip2",
++ "cbc",
++ "crc32fast",
++ "flate2",
++ "getrandom 0.4.3",
++ "js-sys",
++ "lzma-rust2 0.25.0",
++ "sha2 0.11.1",
++ "wasm-bindgen",
++]
++
+ [[package]]
+ name = "sha1"
+ version = "0.10.7"
+@@ -9453,7 +9497,7 @@ dependencies = [
+  "getrandom 0.4.3",
+  "hmac",
+  "indexmap 2.14.2",
+- "lzma-rust2",
++ "lzma-rust2 0.16.5",
+  "memchr",
+  "pbkdf2",
+  "ppmd-rust",
+diff --git a/Cargo.toml b/Cargo.toml
+index 40ee00c..a33f255 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -55,6 +55,8 @@ rust-embed = "8"
+ slotmap = "1.1.1"
+ recently-used-xbel = "1.2.0"
+ zip = "8"
++# Galactic: estrazione di archivi .7z in Rust puro (Apache-2.0)
++sevenz-rust2 = { version = "0.25", default-features = false, features = ["aes256", "bzip2", "deflate"] }
+ md-5 = "0.10.6"
+ sha2 = "0.10"
+ png = "0.18"
+diff --git a/src/archive.rs b/src/archive.rs
+index d51b01b..a6145e2 100644
+--- a/src/archive.rs
++++ b/src/archive.rs
+@@ -16,6 +16,7 @@ pub const SUPPORTED_ARCHIVE_TYPES: &[&str] = &[
+     "application/x-compressed-tar",
+     "application/x-tar",
+     "application/zip",
++    "application/x-7z-compressed",
+     #[cfg(feature = "bzip2")]
+     "application/x-bzip",
+     #[cfg(feature = "bzip2")]
+@@ -38,6 +39,7 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &[
+     ".tgz",
+     ".tar",
+     ".zip",
++    ".7z",
+ ];
+ 
+ pub fn extract(
+@@ -78,6 +80,7 @@ pub fn extract(
+                 }
+                 _ => OperationError::from_err(e, controller),
+             }),
++        "application/x-7z-compressed" => sevenz_extract(path, new_dir, password, controller),
+         #[cfg(feature = "bzip2")]
+         "application/x-bzip"
+         | "application/x-bzip-compressed-tar"
+@@ -106,6 +109,108 @@ pub fn extract(
+     }
+ }
+ 
++/// Galactic: estrazione di archivi .7z (sevenz-rust2, Rust puro), con annullamento, avanzamento e password.
++fn sevenz_extract(
++    path: &Path,
++    directory: &Path,
++    password: Option<&str>,
++    controller: &Controller,
++) -> Result<(Vec<PathBuf>, HashSet<PathBuf>), OperationError> {
++    use sevenz_rust2::{ArchiveReader, Error as SzError, Password};
++    use std::path::Component;
++
++    let to_err = |e: SzError| match e {
++        SzError::PasswordRequired | SzError::MaybeBadPassword(_) => {
++            OperationError::from_kind(OperationErrorType::PasswordRequired, controller)
++        }
++        e => OperationError::from_err(e, controller),
++    };
++
++    let pwd = password.map(Password::from).unwrap_or_else(Password::empty);
++    let file = fs::File::open(path).map_err(|e| OperationError::from_err(e, controller))?;
++    let mut reader = ArchiveReader::new(io::BufReader::new(file), pwd).map_err(to_err)?;
++    let total_files = reader.archive().files.len().max(1);
++
++    let mut written_files = Vec::with_capacity(total_files);
++    let mut target_dirs: HashSet<PathBuf> = HashSet::new();
++    let mut buffer = vec![0u8; 4 * 1024 * 1024];
++    let mut index = 0usize;
++
++    reader
++        .for_each_entries(|entry, data| {
++            let check = || -> io::Result<()> {
++                futures::executor::block_on(async {
++                    controller
++                        .check()
++                        .await
++                        .map_err(|s| io::Error::other(OperationError::from_state(s, controller)))
++                })
++            };
++            check()?;
++            controller.set_progress(index as f32 / total_files as f32);
++            index += 1;
++
++            // percorso sicuro: solo componenti normali (niente "..", niente percorsi assoluti)
++            let mut outpath = directory.to_path_buf();
++            for comp in Path::new(entry.name()).components() {
++                match comp {
++                    Component::Normal(c) => outpath.push(c),
++                    Component::CurDir => {}
++                    _ => {
++                        return Err(SzError::from(io::Error::new(
++                            io::ErrorKind::InvalidData,
++                            "percorso non valido nell'archivio",
++                        )));
++                    }
++                }
++            }
++            if outpath == directory {
++                return Ok(true);
++            }
++
++            if entry.is_directory() {
++                fs::create_dir_all(&outpath)?;
++                target_dirs.insert(outpath);
++                return Ok(true);
++            }
++            if entry.is_anti_item() {
++                return Ok(true);
++            }
++            if let Some(parent) = outpath.parent() {
++                fs::create_dir_all(parent)?;
++                target_dirs.insert(parent.to_path_buf());
++            }
++
++            let mut out = fs::File::create(&outpath)?;
++            let total = entry.size();
++            let mut current = 0u64;
++            loop {
++                check()?;
++                let count = data.read(&mut buffer)?;
++                if count == 0 {
++                    break;
++                }
++                out.write_all(&buffer[..count])?;
++                current += count as u64;
++                if total > 0 && current < total {
++                    controller.set_progress(
++                        (index as f32 - 1.0 + current as f32 / total as f32) / total_files as f32,
++                    );
++                }
++            }
++            drop(out);
++            if entry.has_last_modified_date {
++                let modified: SystemTime = entry.last_modified_date().into();
++                let _ = filetime::set_file_mtime(&outpath, filetime::FileTime::from_system_time(modified));
++            }
++            written_files.push(outpath);
++            Ok(true)
++        })
++        .map_err(to_err)?;
++
++    Ok((written_files, target_dirs))
++}
++
+ // From https://docs.rs/zip/latest/zip/read/struct.ZipArchive.html#method.extract, with cancellation and progress added
+ fn zip_extract<R: io::Read + io::Seek, P: AsRef<Path>>(
+     archive: &mut zip::ZipArchive<R>,
+@@ -319,3 +424,55 @@ pub fn system_time_to_zip_date_time(system_time: SystemTime) -> Option<zip::Date
+     )
+     .ok()
+ }
++
++#[cfg(test)]
++mod galactic_tests {
++    use super::*;
++
++    // Archivi creati con `7z` in GALACTIC_TEST_DIR (prova.7z, prova-pw.7z, solid.7z; cartella "src" dentro)
++    fn dir() -> Option<PathBuf> {
++        std::env::var_os("GALACTIC_TEST_DIR").map(PathBuf::from)
++    }
++
++    fn same(a: &Path, b: &Path) -> bool {
++        fs::read(a).unwrap() == fs::read(b).unwrap()
++    }
++
++    #[test]
++    fn sevenz_plain_and_solid() {
++        let Some(d) = dir() else { return };
++        for name in ["prova.7z", "solid.7z"] {
++            let out = d.join(format!("out-{name}"));
++            let controller = Controller::default();
++            let (files, dirs) = sevenz_extract(&d.join(name), &out, None, &controller).unwrap();
++            assert_eq!(files.len(), 3, "{name}");
++            assert!(!dirs.is_empty());
++            for rel in ["src/a.txt", "src/sub/b.bin", "src/sub/gpl.txt"] {
++                assert!(same(&d.join(rel), &out.join(rel)), "{name}: {rel}");
++            }
++        }
++    }
++
++    #[test]
++    fn sevenz_password() {
++        let Some(d) = dir() else { return };
++        let controller = Controller::default();
++        let out = d.join("out-pw-no");
++        let err = sevenz_extract(&d.join("prova-pw.7z"), &out, None, &controller).unwrap_err();
++        assert!(matches!(err.kind, OperationErrorType::PasswordRequired), "senza password: {err:?}");
++        let controller = Controller::default();
++        let out = d.join("out-pw-ok");
++        let (files, _) =
++            sevenz_extract(&d.join("prova-pw.7z"), &out, Some("Segreta"), &controller).unwrap();
++        assert_eq!(files.len(), 3);
++        assert!(same(&d.join("src/sub/b.bin"), &out.join("src/sub/b.bin")));
++    }
++
++    #[test]
++    fn sevenz_wrong_password() {
++        let Some(d) = dir() else { return };
++        let controller = Controller::default();
++        let out = d.join("out-pw-bad");
++        assert!(sevenz_extract(&d.join("prova-pw.7z"), &out, Some("sbagliata"), &controller).is_err());
++    }
++}
+-- 
+2.53.0
+

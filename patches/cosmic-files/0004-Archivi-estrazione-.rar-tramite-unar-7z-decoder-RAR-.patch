@@ -1,0 +1,185 @@
+From 0307dd3870f97711d9f053073a921ac9bec092df Mon Sep 17 00:00:00 2001
+From: andreae75 <10085653+andreae75@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 16:51:07 +0100
+Subject: [PATCH 4/4] Archivi: estrazione .rar tramite unar/7z (decoder RAR non
+ incorporabile in GPL)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GZuYQ6B6mgdJM4cFckvB9Z
+---
+ src/archive.rs | 134 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 134 insertions(+)
+
+diff --git a/src/archive.rs b/src/archive.rs
+index a6145e2..0e09645 100644
+--- a/src/archive.rs
++++ b/src/archive.rs
+@@ -17,6 +17,9 @@ pub const SUPPORTED_ARCHIVE_TYPES: &[&str] = &[
+     "application/x-tar",
+     "application/zip",
+     "application/x-7z-compressed",
++    "application/vnd.rar",
++    "application/x-rar",
++    "application/x-rar-compressed",
+     #[cfg(feature = "bzip2")]
+     "application/x-bzip",
+     #[cfg(feature = "bzip2")]
+@@ -40,6 +43,7 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &[
+     ".tar",
+     ".zip",
+     ".7z",
++    ".rar",
+ ];
+ 
+ pub fn extract(
+@@ -81,6 +85,9 @@ pub fn extract(
+                 _ => OperationError::from_err(e, controller),
+             }),
+         "application/x-7z-compressed" => sevenz_extract(path, new_dir, password, controller),
++        "application/vnd.rar" | "application/x-rar" | "application/x-rar-compressed" => {
++            rar_extract(path, new_dir, password, controller)
++        }
+         #[cfg(feature = "bzip2")]
+         "application/x-bzip"
+         | "application/x-bzip-compressed-tar"
+@@ -109,6 +116,90 @@ pub fn extract(
+     }
+ }
+ 
++/// Galactic: estrazione di archivi .rar tramite un programma esterno (`unar`, altrimenti `7z`/`7zz`).
++/// Il decodificatore RAR è codice proprietario di RARLAB e non si può incorporare in un programma GPL:
++/// per questo si usa uno strumento di sistema, se presente.
++fn rar_extract(
++    path: &Path,
++    directory: &Path,
++    password: Option<&str>,
++    controller: &Controller,
++) -> Result<(Vec<PathBuf>, HashSet<PathBuf>), OperationError> {
++    use std::process::{Command, Stdio};
++
++    fn in_path(name: &str) -> bool {
++        std::env::var_os("PATH")
++            .map(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
++            .unwrap_or(false)
++    }
++
++    fs::create_dir_all(directory).map_err(|e| OperationError::from_err(e, controller))?;
++
++    let mut cmd = if in_path("unar") {
++        let mut c = Command::new("unar");
++        c.arg("-q").arg("-D").arg("-r").arg("-o").arg(directory);
++        if let Some(pwd) = password {
++            c.arg("-p").arg(pwd);
++        }
++        c.arg(path);
++        c
++    } else if let Some(tool) = ["7zz", "7z", "7za"].into_iter().find(|t| in_path(t)) {
++        let mut c = Command::new(tool);
++        let mut out = std::ffi::OsString::from("-o");
++        out.push(directory);
++        c.arg("x").arg("-y").arg("-aou").arg(out);
++        // senza -p, 7z chiederebbe la password sul terminale: -p vuoto la fa fallire subito
++        c.arg(format!("-p{}", password.unwrap_or("")));
++        c.arg(path);
++        c
++    } else {
++        return Err(OperationError::from_err(
++            "per estrarre i .rar serve il programma 'unar' (sudo apt install unar) oppure '7z'",
++            controller,
++        ));
++    };
++    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
++
++    let mut child = cmd.spawn().map_err(|e| OperationError::from_err(e, controller))?;
++    let mut stderr = child.stderr.take();
++    let stderr_thread = std::thread::spawn(move || {
++        let mut text = String::new();
++        if let Some(s) = stderr.as_mut() {
++            let _ = s.read_to_string(&mut text);
++        }
++        text
++    });
++
++    // attende la fine controllando ogni tanto annullamento/pausa dell'operazione
++    let status = loop {
++        match child.try_wait() {
++            Ok(Some(status)) => break status,
++            Ok(None) => {}
++            Err(e) => return Err(OperationError::from_err(e, controller)),
++        }
++        let checked = futures::executor::block_on(controller.check());
++        if let Err(state) = checked {
++            let _ = child.kill();
++            let _ = child.wait();
++            return Err(OperationError::from_state(state, controller));
++        }
++        std::thread::sleep(std::time::Duration::from_millis(200));
++    };
++    let text = stderr_thread.join().unwrap_or_default();
++
++    if status.success() {
++        return Ok(Default::default());
++    }
++    let lower = text.to_lowercase();
++    if lower.contains("password") || lower.contains("encrypted") || lower.contains("wrong") {
++        return Err(OperationError::from_kind(OperationErrorType::PasswordRequired, controller));
++    }
++    Err(OperationError::from_err(
++        if text.trim().is_empty() { format!("estrazione non riuscita ({status})") } else { text },
++        controller,
++    ))
++}
++
+ /// Galactic: estrazione di archivi .7z (sevenz-rust2, Rust puro), con annullamento, avanzamento e password.
+ fn sevenz_extract(
+     path: &Path,
+@@ -476,3 +567,46 @@ mod galactic_tests {
+         assert!(sevenz_extract(&d.join("prova-pw.7z"), &out, Some("sbagliata"), &controller).is_err());
+     }
+ }
++
++#[cfg(test)]
++mod galactic_mime_tests {
++    use super::*;
++
++    #[test]
++    fn sevenz_mime_detected() {
++        let Some(d) = std::env::var_os("GALACTIC_TEST_DIR").map(PathBuf::from) else { return };
++        let mime = mime_for_path(&d.join("prova.7z"), None, false);
++        eprintln!("MIME rilevato: {}", mime.essence_str());
++        assert!(SUPPORTED_ARCHIVE_TYPES.contains(&mime.essence_str()));
++    }
++}
++
++#[cfg(test)]
++mod galactic_rar_tests {
++    use super::*;
++
++    #[test]
++    fn rar_extract_real_archive() {
++        let (Some(rar), Some(out)) = (
++            std::env::var_os("GALACTIC_RAR_FILE").map(PathBuf::from),
++            std::env::var_os("GALACTIC_RAR_OUT").map(PathBuf::from),
++        ) else {
++            return;
++        };
++        let controller = Controller::default();
++        rar_extract(&rar, &out, None, &controller).unwrap();
++        let n = walk(&out);
++        eprintln!("file estratti: {n}");
++        assert!(n > 0);
++    }
++
++    fn walk(d: &Path) -> usize {
++        fs::read_dir(d)
++            .map(|rd| {
++                rd.filter_map(Result::ok)
++                    .map(|e| if e.path().is_dir() { walk(&e.path()) } else { 1 })
++                    .sum()
++            })
++            .unwrap_or(0)
++    }
++}
+-- 
+2.53.0
+
