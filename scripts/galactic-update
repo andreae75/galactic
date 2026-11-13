@@ -72,5 +72,10 @@ mkdir -p "$HOME/.local/share/dbus-1/services"
 printf '[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.cosmic\nExec=/usr/bin/env XDG_DATA_DIRS=%s/share:/usr/local/share:/usr/share XDG_CURRENT_DESKTOP=COSMIC LD_LIBRARY_PATH=%s/lib %s/libexec/xdg-desktop-portal-cosmic\n' "$P" "$P" "$P" \
   > "$HOME/.local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.cosmic.service"
 
+# pop-launcher (selettore Alt+Tab, ricerca) cerca i suoi componenti in ~/.local/share/pop-launcher
+mkdir -p "$HOME/.local/share/pop-launcher"
+ln -sfn "$P/pop-launcher-root/usr/lib/pop-launcher/plugins" "$HOME/.local/share/pop-launcher/plugins"
+ln -sfn "$P/pop-launcher-root/usr/lib/pop-launcher/scripts" "$HOME/.local/share/pop-launcher/scripts"
+
 echo "=== $(date '+%F %T') COSMIC aggiornato a $NUOVA (con le patch di Galactic) ==="
 avvisa "Galactic aggiornato a $NUOVA" "Compilato e installato in ~/cosmic (prima: $ATTUALE). Parte al prossimo login; la copia vecchia è in ~/cosmic.prev."
