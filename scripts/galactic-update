@@ -49,7 +49,8 @@ done
 LIM="systemd-run --user --scope -q -p MemoryHigh=5G -p MemoryMax=6G nice -n 19 ionice -c3"
 $LIM just build || fallito "compilazione"
 (cd cosmic-applets && $LIM cargo build --release -p cosmic-applet-desktop-lock) || fallito "applet blocco icone"
-(cd cosmic-files && $LIM cargo build --release --workspace) || fallito "cosmic-files"
+# NB: cosmic-files (e cosmic-files-applet) li compila già `just build`: NON ricompilarli con `cargo build --workspace`,
+# che perde la feature "desktop-applet" e fa comparire una finestra "Desktop" a schermo intero dietro le icone.
 
 # installazione (senza cosmic-initial-setup, che scrive in /etc)
 for c in cosmic-applets cosmic-app-library cosmic-bg cosmic-comp cosmic-edit cosmic-files cosmic-greeter cosmic-icons \
