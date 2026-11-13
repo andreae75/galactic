@@ -69,7 +69,7 @@ install -Dm0644 cosmic-applets/cosmic-applet-desktop-lock/data/com.system76.Cosm
 
 # il bus utente di systemd non vede ~/cosmic/share: serve il servizio D-Bus del portale (screenshot, file chooser) in ~/.local/share
 mkdir -p "$HOME/.local/share/dbus-1/services"
-printf '[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.cosmic\nExec=%s/libexec/xdg-desktop-portal-cosmic\n' "$P" \
+printf '[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.cosmic\nExec=/usr/bin/env XDG_DATA_DIRS=%s/share:/usr/local/share:/usr/share XDG_CURRENT_DESKTOP=COSMIC LD_LIBRARY_PATH=%s/lib %s/libexec/xdg-desktop-portal-cosmic\n' "$P" "$P" "$P" \
   > "$HOME/.local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.cosmic.service"
 
 echo "=== $(date '+%F %T') COSMIC aggiornato a $NUOVA (con le patch di Galactic) ==="
