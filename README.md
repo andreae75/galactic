@@ -25,12 +25,17 @@ without touching the rest of the system. The name follows the planets-and-moons 
 - `.7z`: native, pure Rust ([`sevenz-rust2`](https://github.com/hasenbanck/sevenz-rust), Apache-2.0), including solid and password-protected archives, with progress and cancellation.
 - `.rar`: through a system tool (`unar`, or `7z`/`7zz` as a fallback). RAR decoding is RARLAB proprietary code and cannot be embedded in a GPL program. If neither tool is installed, a message explains what to install.
 
+**Mini Player** in COSMIC Media Player (`Ctrl+M`, *Playback › Mini Player*, or the button in the controls)
+- A small window (400×240, no title bar or menus, draggable) that **stays on top of other windows** and follows you across workspaces. Double-click, `Esc` or `Ctrl+M` bring the normal window back, at the same position in the track.
+- Wayland does not let an app resize its own window, so the player opens a new small window and closes the big one. "Always on top" uses COSMIC's *sticky* state, requested through the compositor's toplevel-management protocol.
+
 ### Layout of this repository
 
 | Folder | Content |
 |---|---|
 | `patches/cosmic-files/` | patches for `cosmic-files` (fixed cells, drag and drop, lock check, `.7z`/`.rar` extraction) |
 | `patches/cosmic-applets/` | the new `cosmic-applet-desktop-lock` applet |
+| `patches/cosmic-player/` | Mini Player (always on top) for COSMIC Media Player |
 | `scripts/galactic-update` | fetches the latest stable COSMIC release, re-applies the patches, builds and installs into `~/cosmic` (backup in `~/cosmic.prev`, automatic rollback) |
 | `scripts/aggiorna-patch` | regenerates the patches from the local commits and prints a summary |
 | `scripts/start-galactic` | session start-up script using the paths in `~/cosmic` |
@@ -83,12 +88,17 @@ senza toccare il resto del sistema. Il nome segue la famiglia di pianeti e lune 
 - `.7z`: nativo, in Rust puro ([`sevenz-rust2`](https://github.com/hasenbanck/sevenz-rust), Apache-2.0), anche solidi e con password, con avanzamento e annullamento.
 - `.rar`: tramite uno strumento di sistema (`unar`, oppure `7z`/`7zz`). Il decodificatore RAR è codice proprietario di RARLAB e non si può incorporare in un programma GPL. Se non c'è nessuno dei due strumenti, un messaggio spiega cosa installare.
 
+**Mini Player** in COSMIC Media Player (`Ctrl+M`, *Riproduzione › Mini Player*, o il bottone nei controlli)
+- Una finestra piccola (400×240, senza barra del titolo né menu, trascinabile) che **resta sopra le altre finestre** e ti segue tra le aree di lavoro. Doppio clic, `Esc` o `Ctrl+M` riportano la finestra normale, allo stesso punto del brano.
+- Wayland non permette a un programma di ridimensionare la propria finestra, quindi il lettore apre una nuova finestra piccola e chiude quella grande. Il "sempre in primo piano" usa lo stato *sticky* di COSMIC, richiesto al compositore con il suo protocollo di gestione delle finestre.
+
 ### Struttura del repository
 
 | Cartella | Contenuto |
 |---|---|
 | `patches/cosmic-files/` | patch per `cosmic-files` (celle fisse, trascinamento, controllo del blocco, estrazione `.7z`/`.rar`) |
 | `patches/cosmic-applets/` | la nuova applet `cosmic-applet-desktop-lock` |
+| `patches/cosmic-player/` | Mini Player (sempre in primo piano) per COSMIC Media Player |
 | `scripts/galactic-update` | scarica l'ultima release stabile di COSMIC, riapplica le patch, compila e installa in `~/cosmic` (copia di sicurezza `~/cosmic.prev`, ripristino automatico) |
 | `scripts/aggiorna-patch` | rigenera le patch dai commit locali e mostra un riepilogo |
 | `scripts/start-galactic` | avvio della sessione con i percorsi di `~/cosmic` |

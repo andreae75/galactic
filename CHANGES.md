@@ -7,6 +7,7 @@ Questo file tiene traccia di cosa cambia rispetto alla base di partenza.
 
 | Componente | Repository originale | Release | Commit di base | Data del commit |
 |---|---|---|---|---|
+| `cosmic-player` | [pop-os/cosmic-player](https://github.com/pop-os/cosmic-player) | 1.11.0 | `34a41f2` | — |
 | COSMIC (meta-repo) | [pop-os/cosmic-epoch](https://github.com/pop-os/cosmic-epoch) | `epoch-1.11.0` | `e98f828` | — |
 | `cosmic-files` | [pop-os/cosmic-files](https://github.com/pop-os/cosmic-files) | 1.11.0 | `3cc4b80` | 2026-10-20 |
 | `cosmic-applets` | [pop-os/cosmic-applets](https://github.com/pop-os/cosmic-applets) | 1.11.0 | `328d142f` | 2026-10-13 |
@@ -37,6 +38,14 @@ Comportamento nuovo: se `desktop-layout.txt` non esiste e il desktop è bloccato
 | `Cargo.toml` (+1) | Aggiunge l'applet ai membri del workspace. |
 | `Cargo.lock` (+10) | Voce del nuovo pacchetto. |
 
+### `cosmic-player` — 6 file, +284 / −20 righe
+
+| File | Cosa cambia |
+|---|---|
+| `src/sticky.rs` (nuovo, 111 righe) | Piccolo client Wayland (tramite `cosmic::cctk`) che trova la finestra dal titolo e chiede al compositore lo stato *sticky* (`zcosmic_toplevel_manager_v1.set_sticky`), con più scambi di conferma e verifica dello stato. |
+| `src/main.rs` (+187 / −20) | Modalità Mini: `Message::MiniPlayer` rilancia il lettore (variabili `GALACTIC_MINI`, `GALACTIC_START`, `GALACTIC_PAUSED`) con una finestra 400×240 senza barre e chiude quella vecchia; trascinamento (`MiniDrag`); layout compatto (icona con titolo, meno bottoni); `update_controls` non rimette più la barra del titolo in modalità Mini; il comando del menu è filtrato contro il doppio invio. |
+| `src/key_bind.rs`, `src/menu.rs`, `i18n/en`, `i18n/it` | Scorciatoia `Ctrl+M`, voce *Riproduzione › Mini Player*, testi. |
+
 ## Storia di Galactic
 
 ### 0.0.1 — 2026-11-13
@@ -48,6 +57,9 @@ Comportamento nuovo: se `desktop-layout.txt` non esiste e il desktop è bloccato
 ### 0.0.2 — 2026-11-13
 - Estrazione di archivi `.7z` (Rust nativo, con password) e `.rar` (tramite `unar`/`7z`) da COSMIC Files.
 - `galactic-update`: servizio D-Bus del portale (screenshot) con l'ambiente di `~/cosmic`, collegamento dei componenti di `pop-launcher` (Alt+Tab, ricerca), e compilazione corretta di `cosmic-files` (la modalità applet non va persa).
+
+### 0.0.3 — 2026-11-13
+- Mini Player in COSMIC Media Player: finestra piccola, sempre in primo piano (sticky), con layout compatto.
 
 ## Come si aggiorna questo file
 

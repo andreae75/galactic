@@ -1,0 +1,543 @@
+From 70b720b25ddf4ae45f2303fc8718c04f533ab6bb Mon Sep 17 00:00:00 2001
+From: andreae75 <10085653+andreae75@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 18:10:28 +0100
+Subject: [PATCH] Mini Player: finestra piccola sempre in primo piano (Ctrl+M)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Su Wayland un programma non può ridimensionare la propria finestra, quindi la modalità
+Mini apre una nuova finestra 400x240 (senza barre, trascinabile) allo stesso punto del
+brano e chiude quella grande; per tornare normale fa il contrario. 'Sempre in primo
+piano' è lo stato sticky del compositore COSMIC, richiesto con il protocollo
+cosmic-toplevel-management (src/sticky.rs, tramite cosmic::cctk).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GZuYQ6B6mgdJM4cFckvB9Z
+---
+ i18n/en/cosmic_player.ftl |   2 +
+ i18n/it/cosmic_player.ftl |   2 +
+ src/key_bind.rs           |   1 +
+ src/main.rs               | 187 ++++++++++++++++++++++++++++++++++----
+ src/menu.rs               |   1 +
+ src/sticky.rs             | 111 ++++++++++++++++++++++
+ 6 files changed, 284 insertions(+), 20 deletions(-)
+ create mode 100644 src/sticky.rs
+
+diff --git a/i18n/en/cosmic_player.ftl b/i18n/en/cosmic_player.ftl
+index 36cb2b2..19c8c4e 100644
+--- a/i18n/en/cosmic_player.ftl
++++ b/i18n/en/cosmic_player.ftl
+@@ -51,3 +51,5 @@ ab-repeat-clear = Clear A-B Repeat
+ xdg-name = COSMIC Media Player
+ xdg-comment = Media player for the COSMIC desktop
+ xdg-keywords = Audio;Film;Movie;Music;Sound;Video;
++
++mini-player = Mini Player
+diff --git a/i18n/it/cosmic_player.ftl b/i18n/it/cosmic_player.ftl
+index a472f4f..2bb383d 100644
+--- a/i18n/it/cosmic_player.ftl
++++ b/i18n/it/cosmic_player.ftl
+@@ -42,3 +42,5 @@ off = Off
+ xdg-name = COSMIC Media Player
+ xdg-comment = Lettore multimediale di COSMIC
+ xdg-keywords = Audio;Video;Musica;Film;Suoni;Riproduzione;
++
++mini-player = Mini Player
+diff --git a/src/key_bind.rs b/src/key_bind.rs
+index 817fff9..d839e81 100644
+--- a/src/key_bind.rs
++++ b/src/key_bind.rs
+@@ -25,6 +25,7 @@ pub fn key_binds() -> HashMap<KeyBind, Action> {
+     //TODO: key bindings
+     bind!([], Key::Character("f".into()), Fullscreen);
+     bind!([Alt], Key::Named(Named::Enter), Fullscreen);
++    bind!([Ctrl], Key::Character("m".into()), MiniPlayer);
+     bind!([], Key::Character(" ".into()), PlayPause);
+     bind!([], Key::Named(Named::ArrowLeft), SeekBackward);
+     bind!([], Key::Named(Named::ArrowRight), SeekForward);
+diff --git a/src/main.rs b/src/main.rs
+index 02303e8..2e999d1 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -10,7 +10,7 @@ use cosmic::iced::keyboard::{Event as KeyEvent, Key, Modifiers};
+ use cosmic::iced::mouse::{Event as MouseEvent, ScrollDelta};
+ use cosmic::iced::window::{self, set_mode};
+ use cosmic::iced::{
+-    Alignment, Background, Border, Color, ContentFit, Length, Limits, Subscription,
++    Alignment, Background, Border, Color, ContentFit, Length, Limits, Size, Subscription,
+ };
+ use cosmic::widget::menu::action::MenuAction;
+ use cosmic::widget::{self, Slider, nav_bar, segmented_button};
+@@ -37,6 +37,8 @@ mod menu;
+ #[cfg(feature = "mpris-server")]
+ mod mpris;
+ mod project;
++#[cfg(feature = "wayland")]
++mod sticky;
+ mod thumbnail;
+ mod video;
+ #[cfg(feature = "xdg-portal")]
+@@ -179,6 +181,9 @@ fn main() -> Result<(), Box<dyn Error>> {
+     let mut settings = Settings::default();
+     settings = settings.theme(config.app_theme.theme());
+     settings = settings.size_limits(Limits::NONE.min_width(360.0).min_height(180.0));
++    if std::env::var_os("GALACTIC_MINI").is_some() {
++        settings = settings.size(Size::new(400.0, 240.0));
++    }
+ 
+ 
+     let flags = Flags {
+@@ -204,6 +209,7 @@ pub enum Action {
+     FolderClearRecents,
+     FolderOpenRecent(usize),
+     Fullscreen,
++    MiniPlayer,
+     PlayPause,
+     PlayPrev,
+     PlayNext,
+@@ -229,6 +235,7 @@ impl MenuAction for Action {
+             Self::FolderClearRecents => Message::FolderClearRecents,
+             Self::FolderOpenRecent(index) => Message::FolderOpenRecent(*index),
+             Self::Fullscreen => Message::Fullscreen,
++            Self::MiniPlayer => Message::MiniPlayer,
+             Self::PlayPause => Message::PlayPause,
+             Self::PlayPrev => Message::PlayPrev,
+             Self::PlayNext => Message::PlayNext,
+@@ -318,6 +325,8 @@ pub enum Message {
+     FolderOpenRecent(usize),
+     MultipleLoad(Vec<url::Url>),
+     Fullscreen,
++    MiniPlayer,
++    MiniDrag,
+     Key(Modifiers, Physical, Key),
+     AudioCode(usize),
+     AudioToggle,
+@@ -360,6 +369,12 @@ pub struct App {
+     controls_hovered: bool,
+     dropdown_opt: Option<DropdownKind>,
+     fullscreen: bool,
++    /// Galactic: modalità Mini Player (finestra piccola, senza barre)
++    mini: bool,
++    /// posizione (secondi) da raggiungere appena il brano è caricato (passaggio mini/normale)
++    start_secs: Option<f64>,
++    start_paused: bool,
++    last_mini_toggle: Instant,
+     key_binds: HashMap<KeyBind, Action>,
+     mpris_meta: MprisMeta,
+     mpris_opt: Option<(MprisMeta, MprisState, mpsc::UnboundedSender<MprisEvent>)>,
+@@ -661,7 +676,7 @@ impl App {
+                 .as_ref()
+                 .is_some_and(|video| video.has_video())
+         {
+-            self.core.window.show_headerbar = !self.fullscreen;
++            self.core.window.show_headerbar = !self.fullscreen && !self.mini;
+             self.controls = true;
+             self.controls_time = Instant::now();
+         } else if self.controls && self.controls_time.elapsed() > CONTROLS_TIMEOUT {
+@@ -939,6 +954,10 @@ impl Application for App {
+             controls_hovered: false,
+             dropdown_opt: None,
+             fullscreen: false,
++            mini: std::env::var_os("GALACTIC_MINI").is_some(),
++            start_secs: std::env::var("GALACTIC_START").ok().and_then(|v| v.parse::<f64>().ok()).filter(|s| *s > 0.5),
++            start_paused: std::env::var_os("GALACTIC_PAUSED").is_some(),
++            last_mini_toggle: Instant::now() - Duration::from_secs(10),
+             key_binds: key_binds(),
+             mpris_meta: MprisMeta::default(),
+             mpris_opt: None,
+@@ -986,6 +1005,20 @@ impl Application for App {
+             }
+             _ => app.load(),
+         };
++        let mut command = command;
++        if app.mini {
++            app.core.window.show_headerbar = false;
++            app.core.nav_bar_set_toggled(false);
++            // titolo unico per riconoscere la finestra, poi "sticky" = sempre in primo piano
++            let title = format!("Mini Player {}", std::process::id());
++            let window_id = app.core.main_window_id().unwrap_or(window::Id::RESERVED);
++            command = Task::batch([command, app.set_window_title(title.clone(), window_id)]);
++            #[cfg(feature = "wayland")]
++            std::thread::spawn(move || {
++                let ok = crate::sticky::make_sticky(&title, true);
++                log::warn!("Mini Player sticky: {}", if ok { "ok" } else { "non riuscito" });
++            });
++        }
+         (app, command)
+     }
+ 
+@@ -996,6 +1029,8 @@ impl Application for App {
+     fn on_escape(&mut self) -> Task<Self::Message> {
+         if self.fullscreen {
+             self.update(Message::Fullscreen)
++        } else if self.mini {
++            self.update(Message::MiniPlayer)
+         } else {
+             Task::none()
+         }
+@@ -1083,6 +1118,16 @@ impl Application for App {
+             }
+             Message::DurationChanged(duration) => {
+                 self.duration = duration.as_secs_f64();
++                if let Some(start) = self.start_secs.take() {
++                    if let Some(video) = &mut self.video_opt {
++                        self.position = start.clamp(0.0, self.duration);
++                        let target = Duration::try_from_secs_f64(self.position).unwrap_or_default();
++                        let _ = video.seek(target, true);
++                        if self.start_paused {
++                            video.set_paused(true);
++                        }
++                    }
++                }
+                 self.update_mpris_meta();
+             }
+             Message::FileClose => {
+@@ -1234,6 +1279,56 @@ impl Application for App {
+                     );
+                 }
+             }
++            Message::MiniPlayer => {
++                // il menu può inviare lo stesso comando due volte: si ignora il secondo
++                if self.last_mini_toggle.elapsed() < Duration::from_millis(700) {
++                    return Task::none();
++                }
++                self.last_mini_toggle = Instant::now();
++                self.dropdown_opt = None;
++                if self.fullscreen {
++                    return Task::none();
++                }
++                // Su Wayland un programma non può ridimensionare la propria finestra: si apre una nuova
++                // finestra (piccola o normale) nello stesso punto del brano e si chiude questa.
++                let Ok(exe) = std::env::current_exe() else {
++                    return Task::none();
++                };
++                let mut cmd = std::process::Command::new(exe);
++                if let Some(url) = &self.flags.url_opt {
++                    cmd.arg(url.as_str());
++                }
++                cmd.env("GALACTIC_START", format!("{:.3}", self.position));
++                if self.video_opt.as_ref().map_or(false, |v| v.paused()) {
++                    cmd.env("GALACTIC_PAUSED", "1");
++                } else {
++                    cmd.env_remove("GALACTIC_PAUSED");
++                }
++                if self.mini {
++                    cmd.env_remove("GALACTIC_MINI");
++                } else {
++                    cmd.env("GALACTIC_MINI", "1");
++                }
++                log::warn!("MiniPlayer: nuova finestra (mini={})", !self.mini);
++                match cmd.spawn() {
++                    Ok(_) => {
++                        if let Some(video) = &mut self.video_opt {
++                            video.set_paused(true);
++                        }
++                        // lascia alla nuova finestra il tempo di comparire, poi chiude questa
++                        return Task::perform(
++                            async { tokio::time::sleep(Duration::from_millis(900)).await },
++                            |_| action::app(Message::WindowClose),
++                        );
++                    }
++                    Err(err) => log::error!("impossibile aprire la nuova finestra: {err}"),
++                }
++            }
++            Message::MiniDrag => {
++                if let Some(window_id) = self.core.main_window_id() {
++                    return window::drag(window_id);
++                }
++            }
+             Message::Key(modifiers, physical, key) => {
+                 for (key_bind, action) in self.key_binds.iter() {
+                     if key_bind.matches(modifiers, &key, Some(&physical)) {
+@@ -1759,6 +1854,31 @@ impl Application for App {
+ 
+             let mut col = widget::column::with_capacity(10);
+             col = col.push(widget::space::vertical());
++            if self.mini {
++                // Mini Player: icona piccola con titolo e artista accanto
++                let title = if self.mpris_meta.title.is_empty() {
++                    fl!("untitled")
++                } else {
++                    self.mpris_meta.title.clone()
++                };
++                let artist = if self.mpris_meta.artists.is_empty() {
++                    fl!("unknown-author")
++                } else {
++                    self.mpris_meta.artists.join(", ")
++                };
++                col = col.push(
++                    widget::row::with_capacity(2)
++                        .align_y(Alignment::Center)
++                        .spacing(space_s)
++                        .push(widget::icon::from_name("audio-x-generic-symbolic").size(48))
++                        .push(
++                            widget::column::with_capacity(2)
++                                .push(widget::text::title4(title))
++                                .push(widget::text::body(artist)),
++                        ),
++                );
++                col = col.push(widget::space::vertical());
++            } else {
+             if let Some(album_art) = &self.album_art_opt {
+                 col = col.push(
+                     widget::image(widget::image::Handle::from_path(album_art.path()))
+@@ -1766,7 +1886,10 @@ impl Application for App {
+                         .width(Length::Fill),
+                 );
+             } else {
+-                col = col.push(widget::icon::from_name("audio-x-generic-symbolic").size(256));
++                col = col.push(
++                    widget::icon::from_name("audio-x-generic-symbolic")
++                        .size(if self.mini { 64 } else { 256 }),
++                );
+             }
+             col = col.push(widget::space::vertical().height(space_s));
+             if self.mpris_meta.title.is_empty() {
+@@ -1782,16 +1905,17 @@ impl Application for App {
+                 }
+             }
+             col = col.push(widget::space::vertical().height(space_s));
+-            if !self.mpris_meta.album.is_empty() {
++            if !self.mini && !self.mpris_meta.album.is_empty() {
+                 col = col.push(widget::text::body(fl!(
+                     "album",
+                     album = self.mpris_meta.album.as_str()
+                 )));
+             }
+-            if let Some(year) = &self.mpris_meta.album_year_opt {
++            if let (false, Some(year)) = (self.mini, &self.mpris_meta.album_year_opt) {
+                 col = col.push(widget::text::body(format!("{}", year)));
+             }
+             col = col.push(widget::space::vertical());
++            }
+ 
+             // Space to keep from going under control overlay
+             let mut control_height = space_xxs + 32 + space_xxs;
+@@ -1803,16 +1927,23 @@ impl Application for App {
+             video_player = widget::row::with_children(vec![
+                 widget::space::horizontal().into(),
+                 widget::container(col.push(widget::container(video_player).height(control_height)))
+-                    .width(320)
++                    .width(if self.mini { Length::Fixed(360.0) } else { Length::Fixed(320.0) })
+                     .into(),
+                 widget::space::horizontal().into(),
+             ])
+             .into();
+         }
+ 
+-        let mouse_area = widget::mouse_area(video_player)
+-            .on_press(Message::VideoAreaClick)
+-            .on_double_press(Message::Fullscreen);
++        let mouse_area = if self.mini {
++            // Mini Player: si trascina la finestra dal video, doppio clic per tornare normale
++            widget::mouse_area(video_player)
++                .on_press(Message::MiniDrag)
++                .on_double_press(Message::MiniPlayer)
++        } else {
++            widget::mouse_area(video_player)
++                .on_press(Message::VideoAreaClick)
++                .on_double_press(Message::Fullscreen)
++        };
+ 
+         let mut popover = widget::popover(mouse_area).position(widget::popover::Position::Bottom);
+         let mut popup_items = Vec::<Element<_>>::with_capacity(3);
+@@ -2018,6 +2149,7 @@ impl Application for App {
+                 },
+             );
+ 
++            if !self.mini {
+             row = row.push(widget::tooltip(
+                 widget::button::icon(
+                     widget::icon::from_name(match self.flags.config_state.player_state.repeat {
+@@ -2038,6 +2170,7 @@ impl Application for App {
+                 }),
+                 widget::tooltip::Position::Top,
+             ));
++            }
+             if self.core.is_condensed() {
+                 row = row.push(widget::space::horizontal());
+             } else {
+@@ -2052,25 +2185,39 @@ impl Application for App {
+                         widget::text(format_time(self.duration - self.position)).font(font::mono()),
+                     );
+             }
+-            row = row
+-                .push(
+-                    widget::button::icon(
+-                        widget::icon::from_name("media-view-subtitles-symbolic").size(16),
++            if !self.mini {
++                row = row
++                    .push(
++                        widget::button::icon(
++                            widget::icon::from_name("media-view-subtitles-symbolic").size(16),
++                        )
++                        .on_press(Message::DropdownToggle(DropdownKind::Subtitle)),
+                     )
+-                    .on_press(Message::DropdownToggle(DropdownKind::Subtitle)),
+-                )
++                    .push(
++                        widget::button::icon(
++                            widget::icon::from_svg_bytes(PLAYBACK_SPEED_ICON).symbolic(true),
++                        )
++                        .on_press(Message::DropdownToggle(DropdownKind::Speed)),
++                    );
++            }
++            row = row
+                 .push(
+                     widget::button::icon(
+-                        widget::icon::from_svg_bytes(PLAYBACK_SPEED_ICON).symbolic(true),
++                        widget::icon::from_name(if self.mini {
++                            "view-restore-symbolic"
++                        } else {
++                            "window-pop-out-symbolic"
++                        })
++                        .size(16),
+                     )
+-                    .on_press(Message::DropdownToggle(DropdownKind::Speed)),
++                    .on_press(Message::MiniPlayer),
+                 )
+-                .push(
++                .push_maybe((!self.mini).then(|| {
+                     widget::button::icon(
+                         widget::icon::from_name("view-fullscreen-symbolic").size(16),
+                     )
+-                    .on_press(Message::Fullscreen),
+-                )
++                    .on_press(Message::Fullscreen)
++                }))
+                 .push(
+                     //TODO: scroll up/down on icon to change volume
+                     widget::button::icon(
+diff --git a/src/menu.rs b/src/menu.rs
+index 0f21053..e445304 100644
+--- a/src/menu.rs
++++ b/src/menu.rs
+@@ -101,6 +101,7 @@ pub fn menu_bar<'a>(
+         ));
+     }
+ 
++    playback.push(menu::Item::Button(fl!("mini-player"), None, Action::MiniPlayer));
+     playback.push(menu::Item::Button(
+         match ab_repeat {
+             None => fl!("ab-repeat-set-a"),
+diff --git a/src/sticky.rs b/src/sticky.rs
+new file mode 100644
+index 0000000..0963801
+--- /dev/null
++++ b/src/sticky.rs
+@@ -0,0 +1,111 @@
++// Galactic: chiede al compositore (COSMIC) di rendere "sticky" una finestra, cioè visibile su tutte le
++// aree di lavoro e disegnata sopra le altre finestre ("sempre in primo piano").
++// La finestra si riconosce dal titolo, che il Mini Player rende unico.
++
++use cosmic::cctk::{
++    self,
++    cosmic_protocols::toplevel_management::v1::client::zcosmic_toplevel_manager_v1,
++    sctk::{
++        self,
++        registry::{ProvidesRegistryState, RegistryState},
++    },
++    toplevel_info::{ToplevelInfoHandler, ToplevelInfoState},
++    toplevel_management::{ToplevelManagerHandler, ToplevelManagerState},
++    wayland_client::{Connection, QueueHandle, WEnum, globals::registry_queue_init},
++    wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
++};
++
++struct Data {
++    registry_state: RegistryState,
++    info: ToplevelInfoState,
++    manager: ToplevelManagerState,
++}
++
++impl ProvidesRegistryState for Data {
++    fn registry(&mut self) -> &mut RegistryState {
++        &mut self.registry_state
++    }
++    sctk::registry_handlers!();
++}
++
++impl ToplevelManagerHandler for Data {
++    fn toplevel_manager_state(&mut self) -> &mut ToplevelManagerState {
++        &mut self.manager
++    }
++    fn capabilities(
++        &mut self,
++        _: &Connection,
++        _: &QueueHandle<Self>,
++        _: Vec<WEnum<zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1>>,
++    ) {
++    }
++}
++
++impl ToplevelInfoHandler for Data {
++    fn toplevel_info_state(&mut self) -> &mut ToplevelInfoState {
++        &mut self.info
++    }
++    fn new_toplevel(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &ExtForeignToplevelHandleV1) {}
++    fn update_toplevel(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &ExtForeignToplevelHandleV1) {}
++    fn toplevel_closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &ExtForeignToplevelHandleV1) {}
++}
++
++sctk::delegate_registry!(Data);
++cctk::delegate_toplevel_info!(Data);
++cctk::delegate_toplevel_manager!(Data);
++
++/// Cerca (per qualche secondo) la finestra con questo titolo e la rende sticky. `true` se riuscito.
++pub fn make_sticky(title: &str, sticky: bool) -> bool {
++    let Ok(conn) = Connection::connect_to_env() else {
++        return false;
++    };
++    let Ok((globals, mut queue)) = registry_queue_init::<Data>(&conn) else {
++        return false;
++    };
++    let qh = queue.handle();
++    let registry_state = RegistryState::new(&globals);
++    let (Some(info), Some(manager)) = (
++        ToplevelInfoState::try_new(&registry_state, &qh),
++        ToplevelManagerState::try_new(&registry_state, &qh),
++    ) else {
++        log::warn!("sticky: il compositore non offre la gestione delle finestre");
++        return false;
++    };
++    let mut data = Data {
++        registry_state,
++        info,
++        manager,
++    };
++
++    for _ in 0..25 {
++        if queue.roundtrip(&mut data).is_err() {
++            return false;
++        }
++        let handle = data
++            .info
++            .toplevels()
++            .find(|t| t.title == title)
++            .and_then(|t| t.cosmic_toplevel.clone());
++        if let Some(handle) = handle {
++            if sticky {
++                data.manager.manager.set_sticky(&handle);
++            } else {
++                data.manager.manager.unset_sticky(&handle);
++            }
++            for _ in 0..5 {
++                let _ = queue.roundtrip(&mut data);
++                std::thread::sleep(std::time::Duration::from_millis(100));
++            }
++            let now = data
++                .info
++                .toplevels()
++                .find(|t| t.title == title)
++                .map(|t| format!("{:?}", t.state));
++            log::warn!("sticky: stato finestra dopo la richiesta: {now:?}");
++            return true;
++        }
++        std::thread::sleep(std::time::Duration::from_millis(200));
++    }
++    log::warn!("sticky: finestra \"{title}\" non trovata");
++    false
++}
+-- 
+2.53.0
+

@@ -38,7 +38,7 @@ git checkout -q -f "$NUOVA" || fallito "checkout"
 git submodule update --init --recursive -q --force || fallito "submodule"
 
 # patch di Galactic (se una non si applica più alla nuova versione, ci si ferma)
-for repo in cosmic-files cosmic-applets; do
+for repo in cosmic-files cosmic-applets cosmic-player; do
   for p in "$PATCHES/$repo"/*.patch; do
     [ -e "$p" ] || continue
     (cd "$B/$repo" && git -c user.name=galactic -c user.email=galactic@localhost am --3way -q "$p") \
