@@ -63,6 +63,9 @@ Comportamento nuovo: se `desktop-layout.txt` non esiste e il desktop è bloccato
 ### 0.0.4 — 2026-11-13
 - Media Player a istanza unica (`--new-window` per una finestra separata).
 
+### 0.0.5 — 2026-11-18
+- Applet Drives (cosmic-ext-applet-drives, patch esterna in `patches/cosmic-ext-applet-drives/`): mostra anche i dischi fissi montati sotto `/mnt`, non solo chiavette in `/media`.
+
 ### 0.0.3 — 2026-11-13
 - Mini Player in COSMIC Media Player: finestra piccola, sempre in primo piano (sticky), con layout compatto.
 

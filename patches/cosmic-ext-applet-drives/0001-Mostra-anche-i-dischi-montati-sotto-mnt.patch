@@ -1,0 +1,24 @@
+--- a/src/lib.rs	2026-11-18 22:09:47.888613177 +0100
++++ b/src/lib.rs	2026-11-18 22:23:11.052627575 +0100
+@@ -39,7 +39,7 @@
+         let mount_point = mount.fs_file.replace("\\040", " ");
+         let mount_block = mount.fs_spec;
+ 
+-        if is_removable(&mount_block, &mount_point) {
++        if is_removable(&mount_block, &mount_point) || is_fixed_mnt(&mount_point, &mount.fs_vfstype) {
+             let device_info = device_info(&mount_block);
+             devices.push(Device {
+                 device_type: if device_info.bus == Some(String::from("usb")) {
+@@ -93,6 +93,12 @@
+         })
+ }
+ 
++// Galactic: mostra anche i dischi fissi montati sotto /mnt (ext4, ntfs, cifs, nfs...)
++fn is_fixed_mnt(mount_point: &str, fstype: &str) -> bool {
++    mount_point.starts_with("/mnt/")
++        && !matches!(fstype, "autofs" | "tmpfs" | "overlay" | "nsfs" | "squashfs" | "proc" | "sysfs")
++}
++
+ fn is_removable(mount_block: &str, mount_point: &str) -> bool {
+     // pass early if mounted somewhere we want to show
+     // this helps with drives that aren't flagged as removable
