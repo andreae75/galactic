@@ -1,7 +1,7 @@
 From 50a253e2b6d268d48ad14033e304c777bad575e0 Mon Sep 17 00:00:00 2001
 From: andreae75 <10085653+andreae75@users.noreply.github.com>
 Date: Fri, 20 Nov 2026 17:23:43 +0100
-Subject: [PATCH 3/3] Media Player: informazioni del brano, dimensione finestra
+Subject: [PATCH 3/4] Media Player: informazioni del brano, dimensione finestra
  ricordata, suggerimenti sui controlli
 
 - Riga con formato, frequenza, bit e bitrate sotto titolo e artista (Mini e normale)

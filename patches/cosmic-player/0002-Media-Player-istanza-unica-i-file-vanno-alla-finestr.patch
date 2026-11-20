@@ -1,7 +1,7 @@
 From 7e6fad3c441bcfc1d6d5b650ec7479f1d58207d7 Mon Sep 17 00:00:00 2001
 From: andreae75 <10085653+andreae75@users.noreply.github.com>
 Date: Fri, 13 Nov 2026 20:24:25 +0100
-Subject: [PATCH 2/3] =?UTF-8?q?Media=20Player:=20istanza=20unica=20(i=20fi?=
+Subject: [PATCH 2/4] =?UTF-8?q?Media=20Player:=20istanza=20unica=20(i=20fi?=
  =?UTF-8?q?le=20vanno=20alla=20finestra=20gi=C3=A0=20aperta;=20--new-windo?=
  =?UTF-8?q?w=20per=20una=20separata)?=
 MIME-Version: 1.0

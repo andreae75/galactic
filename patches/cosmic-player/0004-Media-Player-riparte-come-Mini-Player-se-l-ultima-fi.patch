@@ -1,0 +1,74 @@
+From eec1f23f73bee876acc114377cddc73ddc20a6de Mon Sep 17 00:00:00 2001
+From: andreae75 <10085653+andreae75@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 17:26:55 +0100
+Subject: [PATCH 4/4] Media Player: riparte come Mini Player se l'ultima
+ finestra chiusa era Mini
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GZuYQ6B6mgdJM4cFckvB9Z
+---
+ src/main.rs | 28 ++++++++++++++++++++++++++--
+ 1 file changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/src/main.rs b/src/main.rs
+index bbb6d92..2fa57b4 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -241,14 +241,25 @@ fn leggi_dimensione(tipo: &str) -> Option<Size> {
+ 
+ /// Salva la dimensione della finestra "normale" o "mini", tenendo l'altra com'era.
+ fn salva_dimensione(tipo: &str, size: Size) {
++    salva_riga(tipo, &format!("{} {}", size.width.round(), size.height.round()));
++}
++
++/// Che tipo di finestra era l'ultima aperta: "mini" o "normale".
++fn leggi_modo() -> Option<String> {
++    let testo = std::fs::read_to_string(file_dimensioni()?).ok()?;
++    testo.lines().find_map(|riga| riga.strip_prefix("modo ").map(|m| m.trim().to_string()))
++}
++
++/// Scrive una riga "chiave valore" nel file, sostituendo quella vecchia con la stessa chiave.
++fn salva_riga(chiave: &str, valore: &str) {
+     let Some(path) = file_dimensioni() else { return };
+     let vecchio = std::fs::read_to_string(&path).unwrap_or_default();
+     let mut righe: Vec<String> = vecchio
+         .lines()
+-        .filter(|r| r.split_whitespace().next() != Some(tipo))
++        .filter(|r| r.split_whitespace().next() != Some(chiave))
+         .map(String::from)
+         .collect();
+-    righe.push(format!("{tipo} {} {}", size.width.round(), size.height.round()));
++    righe.push(format!("{chiave} {valore}"));
+     if let Some(dir) = path.parent() {
+         let _ = std::fs::create_dir_all(dir);
+     }
+@@ -287,6 +298,17 @@ fn main() -> Result<(), Box<dyn Error>> {
+ 
+     let args = argparse::parse();
+ 
++    // Galactic: se l'ultima finestra chiusa era il Mini Player, si riparte in Mini.
++    // (Non quando si passa da Mini a normale: in quel caso c'e' GALACTIC_HANDOFF.)
++    if args.thumbnail_opt.is_none()
++        && std::env::var_os("GALACTIC_MINI").is_none()
++        && std::env::var_os("GALACTIC_HANDOFF").is_none()
++        && leggi_modo().as_deref() == Some("mini")
++    {
++        // SAFETY: siamo all'inizio di main, prima che il programma crei altri thread.
++        unsafe { std::env::set_var("GALACTIC_MINI", "1") };
++    }
++
+     if let Some(output) = args.thumbnail_opt {
+         let Some(input) = args.url_opt else {
+             log::error!("thumbnailer can only handle exactly one URL");
+@@ -326,6 +348,8 @@ fn main() -> Result<(), Box<dyn Error>> {
+     }
+ 
+     single::become_primary();
++    // Da qui la finestra si apre davvero: ricordiamo che tipo e'.
++    salva_riga("modo", if std::env::var_os("GALACTIC_MINI").is_some() { "mini" } else { "normale" });
+ 
+     localize::localize();
+ 
+-- 
+2.53.0
+

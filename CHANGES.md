@@ -70,6 +70,7 @@ Comportamento nuovo: se `desktop-layout.txt` non esiste e il desktop è bloccato
 - COSMIC Media Player: riga con le informazioni del brano (formato, frequenza, bit, bitrate) sotto titolo e artista, nel Mini e nella finestra normale.
 - La dimensione della finestra (normale e Mini) viene ricordata tra una chiusura e l'altra, in `~/.config/galactic/cosmic-player-finestra`.
 - Suggerimenti al passaggio del mouse su tutti i bottoni dei controlli (italiano e inglese).
+- Se l'ultima finestra chiusa era il Mini Player, alla riapertura il lettore riparte in Mini.
 
 ### 0.0.3 — 2026-11-13
 - Mini Player in COSMIC Media Player: finestra piccola, sempre in primo piano (sticky), con layout compatto.
